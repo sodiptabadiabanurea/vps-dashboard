@@ -1,0 +1,76 @@
+/* === Dark Theme (default) === */
+:root,
+[data-theme="dark"] {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111118;
+  --bg-card: #1a1a2e;
+  --bg-card-hover: #1f1f35;
+  --bg-input: #0d1117;
+  --bg-overlay: rgba(0, 0, 0, 0.7);
+
+  --text-primary: #e0e0e0;
+  --text-secondary: #888;
+  --text-muted: #555;
+
+  --accent: #00ff88;
+  --accent-dim: #00ff8822;
+  --accent-hover: #00cc6a;
+
+  --blue: #3b82f6;
+  --blue-dim: #3b82f622;
+  --yellow: #f59e0b;
+  --yellow-dim: #f59e0b22;
+  --red: #ff0055;
+  --red-dim: #ff005522;
+  --orange: #ff8c00;
+
+  --border: #333;
+  --border-light: #1a1a2e;
+
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  --gauge-track: #1a1a2e;
+  --progress-bg: #333;
+
+  --chart-grid: #252540;
+  --chart-text: #888;
+}
+
+/* === Light Theme === */
+[data-theme="light"] {
+  --bg-primary: #f5f5f7;
+  --bg-secondary: #e8e8ed;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8f8fa;
+  --bg-input: #f0f0f2;
+  --bg-overlay: rgba(0, 0, 0, 0.3);
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #666;
+  --text-muted: #999;
+
+  --accent: #00aa55;
+  --accent-dim: #00aa5522;
+  --accent-hover: #008844;
+
+  --blue: #2563eb;
+  --blue-dim: #2563eb22;
+  --yellow: #d97706;
+  --yellow-dim: #d9770622;
+  --red: #dc2626;
+  --red-dim: #dc262622;
+  --orange: #ea580c;
+
+  --border: #d1d5db;
+  --border-light: #e5e7eb;
+
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+
+  --gauge-track: #e5e7eb;
+  --progress-bg: #d1d5db;
+
+  --chart-grid: #e5e7eb;
+  --chart-text: #999;
+}

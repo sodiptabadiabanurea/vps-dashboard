@@ -1,0 +1,31 @@
+/* === Chart Page === */
+.chart-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.chart-tabs, .chart-range-tabs { display: flex; gap: 4px; }
+.chart-tab, .range-tab {
+  padding: 6px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.chart-tab:hover, .range-tab:hover { border-color: var(--accent); color: var(--accent); }
+.chart-tab.active, .range-tab.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.chart-container { position: relative; height: 300px; }
+.chart-container canvas { width: 100% !important; height: 100% !important; }
+
+@media (max-width: 768px) {
+  .chart-controls { flex-direction: column; align-items: stretch; }
+  .chart-tabs, .chart-range-tabs { justify-content: center; }
+  .chart-container { height: 220px; }
+}
