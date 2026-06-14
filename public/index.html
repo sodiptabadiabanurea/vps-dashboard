@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VPS Dashboard - kakibaabu</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/themes.css">
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/charts.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <line x1="8" y1="21" x2="16" y2="21"/>
+        <line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+      <h1>VPS Dashboard</h1>
+      <span class="server-name">kakibaabu</span>
+    </div>
+    <div class="header-right">
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Connecting...</span>
+      </div>
+      <button class="icon-btn" id="themeToggle" title="Toggle theme">
+        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="alertBtn" title="Alert history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 01-3.46 0"/>
+        </svg>
+        <span class="badge hidden" id="alertBadge">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation -->
+  <nav class="nav">
+    <button class="nav-btn active" data-page="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+      Dashboard
+    </button>
+    <button class="nav-btn" data-page="charts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/>
+      </svg>
+      Charts
+    </button>
+    <button class="nav-btn" data-page="processes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/>
+      </svg>
+      Processes
+    </button>
+    <button class="nav-btn" data-page="alerts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+      </svg>
+      Alerts
+    </button>
+    <button class="nav-btn" data-page="terminal">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/>
+      </svg>
+      Terminal
+    </button>
+    <button class="nav-btn" data-page="docker">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v3"/>
+      </svg>
+      Docker
+    </button>
+    <button class="nav-btn" data-page="files">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+      </svg>
+      Files
+    </button>
+    <button class="nav-btn" data-page="uptime">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/>
+      </svg>
+      Uptime
+    </button>
+  </nav>
+
+  <!-- Pages -->
+  <main class="main">
+    <!-- Dashboard Page -->
+    <div class="page active" id="page-dashboard">
+      <!-- Gauges Row -->
+      <div class="gauge-row">
+        <div class="card gauge-card">
+          <div class="gauge-container">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+              <circle class="gauge-bg" cx="60" cy="60" r="52"/>
+              <circle class="gauge-fill" id="cpuGauge" cx="60" cy="60" r="52"/>
+            </svg>
+            <div class="gauge-value" id="cpuValue">0%</div>
+          </div>
+          <div class="gauge-label">CPU</div>
+        </div>
+        <div class="card gauge-card">
+          <div class="gauge-container">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+              <circle class="gauge-bg" cx="60" cy="60" r="52"/>
+              <circle class="gauge-fill" id="ramGauge" cx="60" cy="60" r="52"/>
+            </svg>
+            <div class="gauge-value" id="ramValue">0%</div>
+          </div>
+          <div class="gauge-label">RAM</div>
+          <div class="gauge-sub" id="ramSub">0 / 0 MB</div>
+        </div>
+        <div class="card gauge-card">
+          <div class="gauge-container">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+              <circle class="gauge-bg" cx="60" cy="60" r="52"/>
+              <circle class="gauge-fill" id="swapGauge" cx="60" cy="60" r="52"/>
+            </svg>
+            <div class="gauge-value" id="swapValue">0%</div>
+          </div>
+          <div class="gauge-label">Swap</div>
+          <div class="gauge-sub" id="swapSub">0 / 0 MB</div>
+        </div>
+        <div class="card gauge-card">
+          <div class="gauge-container">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+              <circle class="gauge-bg" cx="60" cy="60" r="52"/>
+              <circle class="gauge-fill" id="diskGauge" cx="60" cy="60" r="52"/>
+            </svg>
+            <div class="gauge-value" id="diskValue">0%</div>
+          </div>
+          <div class="gauge-label">Disk</div>
+          <div class="gauge-sub" id="diskSub">0 / 0 GB</div>
+        </div>
+      </div>
+
+      <!-- Network + Info Row -->
+      <div class="info-row">
+        <div class="card">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+            Network
+          </h2>
+          <div class="net-grid">
+            <div class="net-box rx">
+              <div class="net-label">Download</div>
+              <div class="net-value" id="netRx">0 KB/s</div>
+            </div>
+            <div class="net-box tx">
+              <div class="net-label">Upload</div>
+              <div class="net-value" id="netTx">0 KB/s</div>
+            </div>
+          </div>
+          <table class="data-table">
+            <thead><tr><th>Period</th><th class="val">RX</th><th class="val">TX</th><th class="val">Total</th></tr></thead>
+            <tbody id="netTable">
+              <tr><td>Today</td><td class="val">-</td><td class="val">-</td><td class="val">-</td></tr>
+            </tbody>
+          </table>
+          <div class="stat-row"><span class="stat-label">Active TCP</span><span class="stat-value" id="tcpCount">0</span></div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            Services
+          </h2>
+          <div id="servicesList" class="services-list">
+            <div class="stat-row"><span class="stat-label">Loading...</span></div>
+          </div>
+          <div class="divider"></div>
+          <h3 class="section-title">System Info</h3>
+          <div id="systemInfo">
+            <div class="stat-row"><span class="stat-label">Kernel</span><span class="stat-value">-</span></div>
+            <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value">-</span></div>
+            <div class="stat-row"><span class="stat-label">Load</span><span class="stat-value">-</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Disk + Processes Preview -->
+      <div class="info-row">
+        <div class="card">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            Disk Breakdown
+          </h2>
+          <table class="data-table">
+            <thead><tr><th>Mount</th><th class="val">Size</th><th class="val">Used</th><th class="val">Avail</th><th class="val">Use%</th></tr></thead>
+            <tbody id="diskTable"></tbody>
+          </table>
+          <div class="divider"></div>
+          <h3 class="section-title">Top Directories</h3>
+          <table class="data-table">
+            <thead><tr><th>Path</th><th class="val">Size</th></tr></thead>
+            <tbody id="dirsTable"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            Top Processes
+          </h2>
+          <table class="proc-table">
+            <thead><tr><th>PID</th><th>Process</th><th>CPU</th><th>MEM</th><th>Status</th></tr></thead>
+            <tbody id="procPreview"></tbody>
+          </table>
+          <a href="#" class="card-link" data-page="processes">View all processes →</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Page -->
+    <div class="page" id="page-charts">
+      <div class="card">
+        <div class="chart-controls">
+          <div class="chart-tabs">
+            <button class="chart-tab active" data-metric="cpu">CPU</button>
+            <button class="chart-tab" data-metric="ram">RAM</button>
+            <button class="chart-tab" data-metric="network">Network</button>
+          </div>
+          <div class="chart-range-tabs">
+            <button class="range-tab" data-range="1h">1h</button>
+            <button class="range-tab active" data-range="6h">6h</button>
+            <button class="range-tab" data-range="24h">24h</button>
+            <button class="range-tab" data-range="7d">7d</button>
+            <button class="range-tab" data-range="30d">30d</button>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="historyChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Processes Page -->
+    <div class="page" id="page-processes">
+      <div class="card">
+        <div class="proc-header">
+          <h2 class="card-title">Process Manager</h2>
+          <div class="proc-controls">
+            <input type="text" class="search-input" id="procSearch" placeholder="Search processes...">
+            <select class="sort-select" id="procSort">
+              <option value="cpu">Sort by CPU</option>
+              <option value="mem">Sort by Memory</option>
+              <option value="pid">Sort by PID</option>
+              <option value="name">Sort by Name</option>
+            </select>
+          </div>
+        </div>
+        <table class="proc-table full">
+          <thead>
+            <tr>
+              <th>PID</th>
+              <th>Process</th>
+              <th>CPU</th>
+              <th>MEM</th>
+              <th>RSS</th>
+              <th>Status</th>
+              <th>Uptime</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="procFull"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Alerts Page -->
+    <div class="page" id="page-alerts">
+      <div class="card">
+        <h2 class="card-title">Alert Configuration</h2>
+        <div id="alertConfig" class="alert-config"></div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Alert History</h2>
+        <div id="alertHistory" class="alert-history">
+          <p class="empty-state">No alerts triggered yet</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terminal Page -->
+    <div class="page" id="page-terminal">
+      <div class="card terminal-card">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Web Terminal
+          <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Ctrl+C to interrupt</span>
+        </h2>
+        <div id="terminal-container" style="background:#000;border-radius:8px;overflow:hidden;height:500px;"></div>
+      </div>
+    </div>
+
+    <!-- Docker Page -->
+    <div class="page" id="page-docker">
+      <div class="card">
+        <div class="proc-header">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v3"/></svg>
+            Docker Containers
+          </h2>
+          <button class="btn btn-ghost" onclick="window.loadDocker()">Refresh</button>
+        </div>
+        <div id="dockerNotAvailable" class="hidden">
+          <p class="empty-state">Docker is not installed or not accessible</p>
+        </div>
+        <table class="proc-table full" id="dockerTable">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Image</th>
+              <th>Status</th>
+              <th>CPU</th>
+              <th>Memory</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="dockerContainers"></tbody>
+        </table>
+      </div>
+      <div class="card" id="dockerLogsCard" style="display:none">
+        <h2 class="card-title">Container Logs: <span id="dockerLogName" style="color:var(--accent)"></span></h2>
+        <pre id="dockerLogs" style="background:var(--bg-input);padding:12px;border-radius:8px;max-height:400px;overflow-y:auto;font-size:12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;"></pre>
+      </div>
+    </div>
+
+    <!-- File Manager Page -->
+    <div class="page" id="page-files">
+      <div class="card">
+        <div class="proc-header">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+            File Manager
+          </h2>
+          <div class="proc-controls">
+            <button class="btn btn-ghost" onclick="window.fmUp()">⬆ Parent</button>
+            <button class="btn btn-ghost" onclick="window.fmRefresh()">Refresh</button>
+          </div>
+        </div>
+        <div class="fm-breadcrumb" id="fmBreadcrumb" style="margin-bottom:12px;font-size:13px;color:var(--text-muted);font-family:monospace;"></div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:40px">Type</th>
+              <th>Name</th>
+              <th class="val">Size</th>
+              <th class="val">Modified</th>
+              <th class="val">Perms</th>
+              <th class="val">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="fmFiles"></tbody>
+        </table>
+      </div>
+      <div class="card" id="fmEditorCard" style="display:none">
+        <h2 class="card-title">Editing: <span id="fmEditorPath" style="color:var(--accent)"></span></h2>
+        <textarea id="fmEditorContent" style="width:100%;min-height:300px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:monospace;font-size:13px;resize:vertical;"></textarea>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn btn-ghost" onclick="document.getElementById('fmEditorCard').style.display='none'">Cancel</button>
+          <button class="btn btn-danger" onclick="window.fmSave()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Uptime Page -->
+    <div class="page" id="page-uptime">
+      <div class="card">
+        <div class="proc-header">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+            Uptime Monitor
+          </h2>
+          <button class="btn btn-ghost" onclick="window.showAddUptime()">+ Add Target</button>
+        </div>
+        <div id="uptimeTargets"></div>
+      </div>
+      <div class="card" id="uptimeDetailsCard" style="display:none">
+        <h2 class="card-title">Uptime History: <span id="uptimeDetailName" style="color:var(--accent)"></span></h2>
+        <div class="chart-container" style="height:200px">
+          <canvas id="uptimeChart"></canvas>
+        </div>
+        <div id="uptimeStats" style="margin-top:12px;"></div>
+      </div>
+      <!-- Add Target Dialog -->
+      <div class="dialog-overlay hidden" id="addUptimeDialog">
+        <div class="dialog">
+          <div class="dialog-title">Add Uptime Target</div>
+          <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:4px;">Name</label>
+            <input type="text" id="uptimeName" class="search-input" style="width:100%" placeholder="My Website">
+          </div>
+          <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:4px;">URL</label>
+            <input type="text" id="uptimeUrl" class="search-input" style="width:100%" placeholder="https://example.com">
+          </div>
+          <div class="dialog-actions">
+            <button class="btn btn-ghost" onclick="document.getElementById('addUptimeDialog').classList.add('hidden')">Cancel</button>
+            <button class="btn btn-danger" onclick="window.addUptimeTarget()">Add</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Confirm Dialog -->
+  <div class="dialog-overlay hidden" id="confirmDialog">
+    <div class="dialog">
+      <div class="dialog-title" id="dialogTitle">Confirm Action</div>
+      <div class="dialog-body" id="dialogBody">Are you sure?</div>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="dialogCancel">Cancel</button>
+        <button class="btn btn-danger" id="dialogConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert Toast -->
+  <div class="alert-toast hidden" id="alertToast">
+    <div class="alert-toast-icon">⚠️</div>
+    <div class="alert-toast-text" id="alertToastText"></div>
+    <button class="alert-toast-close" id="alertToastClose">×</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/socket.js"></script>
+  <script src="/js/dashboard.js"></script>
+  <script src="/js/charts.js"></script>
+  <script src="/js/processes.js"></script>
+  <script src="/js/alerts.js"></script>
+  <script src="/js/terminal.js"></script>
+  <script src="/js/docker.js"></script>
+  <script src="/js/files.js"></script>
+  <script src="/js/uptime.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

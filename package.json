@@ -1,0 +1,17 @@
+{
+  "name": "vps-dashboard",
+  "version": "1.0.0",
+  "description": "Modern VPS monitoring dashboard with real-time WebSocket updates",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.21",
+    "socket.io": "^4.8",
+    "better-sqlite3": "^11.7",
+    "node-pty": "^1.0.0",
+    "multer": "^1.4.5-lts.1"
+  }
+}
