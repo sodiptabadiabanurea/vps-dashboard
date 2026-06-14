@@ -11,6 +11,10 @@ Modern, real-time VPS monitoring dashboard with WebSocket updates, process manag
 - 📁 **File Manager** — Browse, upload, download, edit, delete files
 - 🖥️ **Web Terminal** — Live terminal access from browser (xterm.js)
 - ⏱️ **Uptime Monitor** — HTTP endpoint checker with history
+- 🛠️ **Tools Suite** — Ping, traceroute, DNS lookup, port scan, SSL monitor, cron viewer, backups
+- 🛡️ **Security Center** — Health score, fail2ban, login history, audit log, 2FA, notifications
+- 📜 **Logs Viewer** — System, auth, nginx, kernel, dashboard, cron, and Docker logs
+- 📤 **CSV Export** — Download historical metrics for analysis
 - 🔔 **Telegram Alerts** — CPU/RAM/Disk/Swap threshold notifications
 - 🌙/☀️ **Dark/Light Theme** — Toggle with localStorage persistence
 - 📱 **Mobile Responsive** — Works on phone/tablet
@@ -38,6 +42,15 @@ Modern, real-time VPS monitoring dashboard with WebSocket updates, process manag
 
 ### Uptime
 ![Uptime monitor](docs/uptime.png)
+
+### Tools — network tools, SSL, cron, backups
+![Tools page](docs/tools.png)
+
+### Security — health, fail2ban, audit, 2FA, notifications
+![Security page](docs/security.png)
+
+### Logs — system log viewer
+![Logs page](docs/logs.png)
 
 ### Light theme
 ![Light theme dashboard](docs/light-theme.png)
