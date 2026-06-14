@@ -16,6 +16,32 @@ Modern, real-time VPS monitoring dashboard with WebSocket updates, process manag
 - 📱 **Mobile Responsive** — Works on phone/tablet
 - 🔒 **Basic Auth** — Password-protected destructive actions
 
+## Screenshots
+
+### Dashboard
+![Dashboard gauges](docs/dashboard.png)
+
+### Charts — CPU, 6h range
+![Charts CPU 6h](docs/charts.png)
+
+### Processes
+![Processes table](docs/processes.png)
+
+### Docker
+![Docker monitor](docs/docker.png)
+
+### Files
+![File manager](docs/files.png)
+
+### Terminal
+![Web terminal](docs/terminal.png)
+
+### Uptime
+![Uptime monitor](docs/uptime.png)
+
+### Light theme
+![Light theme dashboard](docs/light-theme.png)
+
 ## Quick Start
 
 ```bash
