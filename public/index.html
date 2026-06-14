@@ -92,6 +92,24 @@
       </svg>
       Uptime
     </button>
+    <button class="nav-btn" data-page="tools">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+      </svg>
+      Tools
+    </button>
+    <button class="nav-btn" data-page="security">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      Security
+    </button>
+    <button class="nav-btn" data-page="logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/>
+      </svg>
+      Logs
+    </button>
   </nav>
 
   <!-- Pages -->
@@ -413,6 +431,149 @@
         </div>
       </div>
     </div>
+
+    <!-- Tools Page -->
+    <div class="page" id="page-tools">
+      <!-- Network Tools -->
+      <div class="card">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><circle cx="12" cy="20" r="1"/></svg>
+          Network Tools
+        </h2>
+        <div class="tool-grid">
+          <div class="tool-box">
+            <h3>Ping</h3>
+            <div class="tool-input-row">
+              <input type="text" id="pingHost" class="search-input" placeholder="Host (e.g. 8.8.8.8)">
+              <button class="btn btn-ghost" onclick="window.runPing()">Ping</button>
+            </div>
+            <pre id="pingResult" class="tool-output"></pre>
+          </div>
+          <div class="tool-box">
+            <h3>Traceroute</h3>
+            <div class="tool-input-row">
+              <input type="text" id="traceHost" class="search-input" placeholder="Host">
+              <button class="btn btn-ghost" onclick="window.runTraceroute()">Trace</button>
+            </div>
+            <pre id="traceResult" class="tool-output"></pre>
+          </div>
+          <div class="tool-box">
+            <h3>DNS Lookup</h3>
+            <div class="tool-input-row">
+              <input type="text" id="dnsHost" class="search-input" placeholder="Domain">
+              <select id="dnsType" class="sort-select"><option>A</option><option>AAAA</option><option>MX</option><option>TXT</option><option>NS</option></select>
+              <button class="btn btn-ghost" onclick="window.runDns()">Lookup</button>
+            </div>
+            <pre id="dnsResult" class="tool-output"></pre>
+          </div>
+          <div class="tool-box">
+            <h3>Port Scan</h3>
+            <div class="tool-input-row">
+              <input type="text" id="portHost" class="search-input" placeholder="Host">
+              <button class="btn btn-ghost" onclick="window.runPortscan()">Scan</button>
+            </div>
+            <pre id="portResult" class="tool-output"></pre>
+          </div>
+        </div>
+      </div>
+      <!-- SSL Monitor -->
+      <div class="card">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          SSL Certificates
+        </h2>
+        <div id="sslCerts"></div>
+      </div>
+      <!-- Cron Manager -->
+      <div class="card">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+          Cron Jobs
+        </h2>
+        <pre id="cronJobs" class="tool-output" style="max-height:300px"></pre>
+      </div>
+      <!-- Backup -->
+      <div class="card">
+        <div class="proc-header">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Backups
+          </h2>
+          <button class="btn btn-ghost" onclick="window.createBackup()">Create Backup</button>
+        </div>
+        <div id="backupList"></div>
+      </div>
+    </div>
+
+    <!-- Security Page -->
+    <div class="page" id="page-security">
+      <!-- Health Score -->
+      <div class="card">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          System Health
+        </h2>
+        <div id="healthScore" style="text-align:center;padding:20px;"></div>
+      </div>
+      <!-- Fail2ban -->
+      <div class="card">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Fail2ban
+        </h2>
+        <div id="fail2banStatus"></div>
+      </div>
+      <!-- Login History -->
+      <div class="card">
+        <h2 class="card-title">Login History</h2>
+        <div id="loginHistory" style="max-height:300px;overflow-y:auto;"></div>
+      </div>
+      <!-- Audit Log -->
+      <div class="card">
+        <h2 class="card-title">Audit Log</h2>
+        <div id="auditLog" style="max-height:300px;overflow-y:auto;"></div>
+      </div>
+      <!-- 2FA -->
+      <div class="card">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          Two-Factor Authentication
+        </h2>
+        <div id="twoFAStatus"></div>
+      </div>
+      <!-- Notifications -->
+      <div class="card">
+        <h2 class="card-title">Notification Channels</h2>
+        <div id="notifChannels"></div>
+      </div>
+    </div>
+
+    <!-- Logs Page -->
+    <div class="page" id="page-logs">
+      <div class="card">
+        <div class="proc-header">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            System Logs
+          </h2>
+          <div class="proc-controls">
+            <select id="logSource" class="sort-select" onchange="window.loadLogs()">
+              <option value="syslog">System Log</option>
+              <option value="auth">Auth Log</option>
+              <option value="nginx">Nginx Access</option>
+              <option value="nginx-error">Nginx Error</option>
+              <option value="kern">Kernel Log</option>
+              <option value="dashboard">Dashboard App</option>
+              <option value="cron">Cron Log</option>
+              <option value="docker">Docker Log</option>
+            </select>
+            <input type="text" id="logSearch" class="search-input" placeholder="Search..." style="width:150px">
+            <button class="btn btn-ghost" onclick="window.loadLogs()">Refresh</button>
+          </div>
+        </div>
+        <pre id="logContent" class="tool-output" style="max-height:500px;overflow-y:auto;font-size:11px;line-height:1.4;"></pre>
+      </div>
+    </div>
   </main>
 
   <!-- Toast -->
@@ -450,6 +611,9 @@
   <script src="/js/docker.js"></script>
   <script src="/js/files.js"></script>
   <script src="/js/uptime.js"></script>
+  <script src="/js/tools.js"></script>
+  <script src="/js/security.js"></script>
+  <script src="/js/logs.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

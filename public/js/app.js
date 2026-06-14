@@ -21,6 +21,10 @@
       if (page === 'docker' && window.loadDocker) window.loadDocker();
       if (page === 'files' && window.fmLoad) window.fmLoad();
       if (page === 'uptime' && window.loadUptime) window.loadUptime();
+      if (page === 'tools' && window.loadTools) window.loadTools();
+      if (page === 'security' && window.loadSecurity) window.loadSecurity();
+      if (page === 'logs' && window.loadLogs) { window.loadLogs(); window.startLogFollow?.(); }
+      if (page !== 'logs' && window.stopLogFollow) window.stopLogFollow();
     });
   });
 

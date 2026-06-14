@@ -451,6 +451,26 @@ body {
 .docker-status.paused { background: var(--yellow-dim); color: var(--yellow); }
 .docker-status.created { background: var(--blue-dim); color: var(--blue); }
 
+/* === Tools === */
+.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.tool-box { background: var(--bg-input); border-radius: 8px; padding: 16px; }
+.tool-box h3 { font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--accent); }
+.tool-input-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.tool-output {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', monospace;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
 /* === Uptime === */
 .uptime-item { display: flex; align-items: center; gap: 16px; padding: 12px 16px; background: var(--bg-input); border-radius: 8px; margin-bottom: 8px; }
 .uptime-item-name { font-weight: 600; min-width: 120px; }
@@ -475,4 +495,6 @@ body {
   .proc-header { flex-direction: column; align-items: stretch; }
   .proc-controls { flex-direction: column; }
   .search-input { width: 100%; }
+  .tool-grid { grid-template-columns: 1fr; }
+  .tool-input-row { flex-wrap: wrap; }
 }

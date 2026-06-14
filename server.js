@@ -3,7 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const config = require('./config');
-const { stmts } = require('./db');
+const { db, stmts } = require('./db');
 
 const app = express();
 const server = http.createServer(app);
@@ -16,11 +16,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 function requireAuth(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Basic ')) {
+    logLogin(req.ip, req.get('user-agent'), false);
     res.set('WWW-Authenticate', 'Basic realm="VPS Dashboard"');
     return res.status(401).send('Authentication required');
   }
   const [user, pass] = Buffer.from(auth.split(' ')[1], 'base64').toString().split(':');
-  if (user === config.user && pass === config.pass) return next();
+  if (user === config.user && pass === config.pass) {
+    logLogin(req.ip, req.get('user-agent'), true);
+    return next();
+  }
+  logLogin(req.ip, req.get('user-agent'), false);
   res.set('WWW-Authenticate', 'Basic realm="VPS Dashboard"');
   res.status(401).send('Invalid credentials');
 }
@@ -41,6 +46,18 @@ const { setupTerminal } = require('./terminal');
 const { setupDockerRoutes } = require('./docker');
 const { setupFileManagerRoutes } = require('./filemanager');
 const { initUptimeTables, startChecker, setupUptimeRoutes } = require('./uptime');
+
+// --- Additional modules ---
+const { setupLogRoutes } = require('./modules/logs');
+const { setupCronRoutes } = require('./modules/cron');
+const { setupSSLRoutes } = require('./modules/ssl');
+const { setupNetworkToolRoutes } = require('./modules/network-tools');
+const { setupBackupRoutes } = require('./modules/backup');
+const { setupFail2banRoutes } = require('./modules/fail2ban');
+const { initAuditTables, initAudit, logLogin, auditLog, setupAuditRoutes } = require('./modules/audit');
+const { setupTwoFARoutes } = require('./modules/twofa');
+const { setupNotificationRoutes } = require('./modules/notifications');
+const { setupHealthRoutes } = require('./modules/health');
 
 // --- State ---
 let lastMetrics = {};
@@ -204,6 +221,8 @@ app.put('/api/alerts/config/:type', requireAuth, (req, res) => {
 
 // --- Alert engine callback ---
 alertEngine.init(stmts, io);
+initAuditTables(db);
+initAudit(stmts);
 
 // --- Terminal ---
 setupTerminal(io);
@@ -217,6 +236,18 @@ setupFileManagerRoutes(app, requireAuth);
 // --- Uptime Monitor ---
 setupUptimeRoutes(app, requireAuth, stmts);
 startChecker(stmts, io);
+
+// --- Additional modules ---
+setupLogRoutes(app, requireAuth);
+setupCronRoutes(app, requireAuth, auditLog);
+setupSSLRoutes(app, requireAuth, config);
+setupNetworkToolRoutes(app, requireAuth);
+setupBackupRoutes(app, requireAuth, auditLog, config);
+setupFail2banRoutes(app, requireAuth, auditLog);
+setupAuditRoutes(app, requireAuth);
+setupTwoFARoutes(app, requireAuth, stmts, auditLog);
+setupNotificationRoutes(app, requireAuth, stmts, auditLog);
+setupHealthRoutes(app, requireAuth, stmts);
 
 // --- Start collection loops ---
 setInterval(collectMetrics, config.metricsInterval);

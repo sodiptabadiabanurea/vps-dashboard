@@ -67,6 +67,38 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_uptime_checks_target ON uptime_checks (target_id, ts);
+
+  CREATE TABLE IF NOT EXISTS login_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    success INTEGER DEFAULT 1
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_login_ts ON login_history (ts);
+
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    detail TEXT,
+    ip TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts);
+
+  CREATE TABLE IF NOT EXISTS two_fa_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER DEFAULT 0,
+    secret TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS notification_channels (
+    type TEXT PRIMARY KEY,
+    enabled INTEGER DEFAULT 0,
+    webhook_url TEXT DEFAULT ''
+  );
 `);
 
 // --- Seed alert config from defaults ---
@@ -78,6 +110,13 @@ const upsertAlert = db.prepare(`
 for (const [type, cfg] of Object.entries(config.alerts)) {
   upsertAlert.run(type, cfg.enabled ? 1 : 0, cfg.threshold, cfg.cooldown);
 }
+
+// Seed notification channels
+const upsertNotif = db.prepare(`INSERT OR IGNORE INTO notification_channels (type, enabled, webhook_url) VALUES (?, 0, '')`);
+for (const ch of ['telegram', 'discord', 'slack']) upsertNotif.run(ch);
+
+// Seed 2FA config
+db.prepare(`INSERT OR IGNORE INTO two_fa_config (id, enabled, secret) VALUES (1, 0, NULL)`).run();
 
 // --- Prepared statements ---
 const stmts = {
@@ -124,6 +163,27 @@ const stmts = {
   insertUptimeCheck: db.prepare(`INSERT INTO uptime_checks (target_id, ts, status, response_ms, error) VALUES (?, ?, ?, ?, ?)`),
   getUptimeChecks: db.prepare(`SELECT * FROM uptime_checks WHERE target_id = ? AND ts >= ? ORDER BY ts ASC`),
   getLastUptimeCheck: db.prepare(`SELECT * FROM uptime_checks WHERE target_id = ? AND status = ? ORDER BY ts DESC LIMIT 1`),
+
+  // Login history
+  insertLogin: db.prepare(`INSERT INTO login_history (ts, ip, user_agent, success) VALUES (?, ?, ?, ?)`),
+  getLogins: db.prepare(`SELECT * FROM login_history ORDER BY ts DESC LIMIT ?`),
+  deleteOldLogins: db.prepare(`DELETE FROM login_history WHERE ts < ?`),
+
+  // Audit log
+  insertAudit: db.prepare(`INSERT INTO audit_log (ts, action, detail, ip) VALUES (?, ?, ?, ?)`),
+  getAudits: db.prepare(`SELECT * FROM audit_log ORDER BY ts DESC LIMIT ?`),
+  deleteOldAudits: db.prepare(`DELETE FROM audit_log WHERE ts < ?`),
+
+  // 2FA
+  getTwoFAConfig: db.prepare(`SELECT * FROM two_fa_config WHERE id = 1`),
+  setTwoFASecret: db.prepare(`UPDATE two_fa_config SET secret = ? WHERE id = 1`),
+  enableTwoFA: db.prepare(`UPDATE two_fa_config SET enabled = 1 WHERE id = 1`),
+  disableTwoFA: db.prepare(`UPDATE two_fa_config SET enabled = 0, secret = NULL WHERE id = 1`),
+
+  // Notifications
+  getNotifConfig: db.prepare(`SELECT * FROM notification_channels`),
+  getNotifConfigByType: db.prepare(`SELECT * FROM notification_channels WHERE type = ?`),
+  updateNotifConfig: db.prepare(`UPDATE notification_channels SET enabled = ?, webhook_url = ? WHERE type = ?`),
 };
 
 // --- Cleanup old data periodically ---
