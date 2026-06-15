@@ -11,6 +11,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// The dashboard is served behind local Nginx. Trust only loopback proxy headers
+// so rate limiting sees the real client IP instead of 127.0.0.1 for everyone.
+app.set('trust proxy', 'loopback');
+
 // --- Security headers ---
 app.use(helmet({
   contentSecurityPolicy: {
@@ -28,9 +32,20 @@ app.use(helmet({
 // --- Rate limiting ---
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => (
+    req.path === '/' ||
+    req.path.startsWith('/socket.io/') ||
+    req.path.startsWith('/js/') ||
+    req.path.startsWith('/css/') ||
+    req.path.startsWith('/assets/') ||
+    req.path.endsWith('.js') ||
+    req.path.endsWith('.css') ||
+    req.path.endsWith('.svg') ||
+    req.path.endsWith('.png')
+  ),
   message: { error: 'Too many requests, please try again later' },
 });
 app.use(globalLimiter);
