@@ -243,6 +243,39 @@
           </table>
           <a href="#" class="card-link" data-page="processes">View all processes →</a>
         </div>
+
+        <!-- Predictive Forecast Card -->
+        <div class="card">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+            Predictive Forecast
+            <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">30-day trend</span>
+          </h2>
+          <div class="forecast-grid" id="forecastWidget">
+            <div class="forecast-stat">
+              <span class="forecast-icon">💾</span>
+              <div>
+                <div class="forecast-label">Disk</div>
+                <div class="forecast-val" id="fcDisk">—</div>
+              </div>
+            </div>
+            <div class="forecast-stat">
+              <span class="forecast-icon">🧠</span>
+              <div>
+                <div class="forecast-label">RAM</div>
+                <div class="forecast-val" id="fcRam">—</div>
+              </div>
+            </div>
+            <div class="forecast-stat">
+              <span class="forecast-icon">⚡</span>
+              <div>
+                <div class="forecast-label">CPU Trend</div>
+                <div class="forecast-val" id="fcCpu">—</div>
+              </div>
+            </div>
+          </div>
+          <div id="fcDetail" class="forecast-detail"></div>
+        </div>
       </div>
     </div>
 

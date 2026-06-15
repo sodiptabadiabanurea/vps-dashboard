@@ -208,8 +208,8 @@ function writeHistory() {
       lastMetrics.ram_total,
       lastMetrics.swap_used,
       lastMetrics.swap_total,
-      lastMetrics.disk_used || 0,
-      lastMetrics.disk_total || 0,
+      (() => { const root = (lastDisk.filesystems || []).find(f => f.mount === '/'); return root ? root.used : 0; })(),
+      (() => { const root = (lastDisk.filesystems || []).find(f => f.mount === '/'); return root ? root.size : 0; })(),
       lastMetrics.net_rx,
       lastMetrics.net_tx
     );
@@ -325,6 +325,98 @@ app.get('/api/alerts/suppression', requireAuth, (_req, res) => {
 // --- Alert engine callback ---
 alertEngine.init(stmts, io);
 initTimeline(stmts, io);
+
+// --- REST API: Predictive Forecasting ---
+app.get('/api/forecast', requireAuth, (_req, res) => {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const since = now - 30 * 86400; // 30 days of data
+    const rows = stmts.getMetricsRange.all(since);
+
+    if (rows.length < 100) {
+      return res.json({ error: 'Need at least 100 data points for forecast', ready: false });
+    }
+
+    // Simple linear regression: y = mx + b
+    function regression(data, xFn, yFn) {
+      const n = data.length;
+      let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+      for (const d of data) {
+        const x = xFn(d), y = yFn(d);
+        sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x;
+      }
+      const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+      const intercept = (sumY - slope * sumX) / n;
+      // R-squared
+      const yMean = sumY / n;
+      let ssRes = 0, ssTot = 0;
+      for (const d of data) {
+        const x = xFn(d), y = yFn(d);
+        const predicted = slope * x + intercept;
+        ssRes += (y - predicted) ** 2;
+        ssTot += (y - yMean) ** 2;
+      }
+      const r2 = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+      return { slope, intercept, r2 };
+    }
+
+    // Index-based regression (data point index as x)
+    const ts0 = rows[0].ts;
+    const xFn = d => (d.ts - ts0) / 86400; // days since first sample
+
+    // Disk (used_bytes / total)
+    const diskReg = regression(rows, xFn, d => d.disk_used);
+    const diskPct = rows[rows.length - 1].disk_total > 0 ? (rows[rows.length - 1].disk_used / rows[rows.length - 1].disk_total) * 100 : 0;
+    let diskFullDays = null;
+    if (diskReg.slope > 0 && rows[rows.length - 1].disk_total > 0) {
+      const daysToFull = (rows[rows.length - 1].disk_total - rows[rows.length - 1].disk_used) / diskReg.slope / 86400;
+      if (daysToFull > 0 && daysToFull < 3650) diskFullDays = Math.round(daysToFull);
+    }
+
+    // RAM
+    const ramReg = regression(rows, xFn, d => d.ram_used);
+    let ramExhaustionDays = null;
+    if (ramReg.slope > 0 && rows[rows.length - 1].ram_total > 0) {
+      const daysToFull = (rows[rows.length - 1].ram_total - rows[rows.length - 1].ram_used) / ramReg.slope / 86400;
+      if (daysToFull > 0 && daysToFull < 3650) ramExhaustionDays = Math.round(daysToFull);
+    }
+
+    // CPU trend
+    const cpuReg = regression(rows, xFn, d => d.cpu);
+    const cpuTrend = cpuReg.slope * 86400 >= 0.5 ? 'rising' : cpuReg.slope * 86400 <= -0.5 ? 'falling' : 'stable';
+
+    // Current values
+    const latest = rows[rows.length - 1];
+    const diskFreeGB = ((latest.disk_total - latest.disk_used) / (1024 * 1024)).toFixed(1);
+    const ramUsedPct = latest.ram_total > 0 ? Math.round((latest.ram_used / latest.ram_total) * 100) : 0;
+
+    res.json({
+      ready: true,
+      data_points: rows.length,
+      period_days: Math.round((rows[rows.length - 1].ts - rows[0].ts) / 86400),
+      disk: {
+        used_pct: Math.round(diskPct),
+        free_gb: parseFloat(diskFreeGB),
+        trend: diskReg.slope * 86400 * 1024 * 1024 >= 1024 ? 'growing' : diskReg.slope * 86400 * 1024 * 1024 <= -1024 ? 'shrinking' : 'stable',
+        days_to_full: diskFullDays,
+        r2: Math.round(diskReg.r2 * 100),
+      },
+      ram: {
+        used_pct: ramUsedPct,
+        trend: ramReg.slope * 86400 * 1024 * 1024 >= 512 ? 'growing' : 'stable',
+        days_to_exhaustion: ramExhaustionDays,
+        r2: Math.round(ramReg.r2 * 100),
+      },
+      cpu: {
+        trend: cpuTrend,
+        avg_30d: Math.round(rows.reduce((s, r) => s + r.cpu, 0) / rows.length),
+        r2: Math.round(cpuReg.r2 * 100),
+      },
+    });
+  } catch (e) {
+    res.json({ error: 'Forecast unavailable', ready: false });
+  }
+});
 
 // --- Hook alert events into timeline ---
 const origAlertInsert = stmts.insertAlert;

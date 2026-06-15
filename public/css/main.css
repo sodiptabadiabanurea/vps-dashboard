@@ -608,4 +608,25 @@ body {
   .timeline-header { flex-direction: column; align-items: stretch; }
   .timeline-item { padding: 12px 16px; }
   .timeline-dot { width: 10px; height: 10px; left: -1px; }
+  .forecast-grid { grid-template-columns: 1fr; }
 }
+
+/* === Predictive Forecast === */
+.forecast-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.forecast-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+.forecast-icon { font-size: 22px; }
+.forecast-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+.forecast-val { font-size: 14px; font-weight: 600; }
+.forecast-detail { font-size: 12px; color: var(--text-muted); text-align: center; }

@@ -143,6 +143,11 @@ const stmts = {
     SELECT * FROM metrics WHERE ts >= ? ORDER BY ts ASC
   `),
 
+  getMetricsRange: db.prepare(`
+    SELECT ts, cpu, ram_used, ram_total, disk_used, disk_total, swap_used, swap_total
+    FROM metrics WHERE ts >= ? ORDER BY ts ASC
+  `),
+
   insertAlert: db.prepare(`
     INSERT INTO alerts (ts, type, message, value, threshold)
     VALUES (?, ?, ?, ?, ?)

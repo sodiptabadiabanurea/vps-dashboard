@@ -142,4 +142,51 @@
   // Expose formatters
   window.formatBytes = formatBytes;
   window.formatSpeed = formatSpeed;
+
+  // --- Predictive Forecast ---
+  async function loadForecast() {
+    try {
+      const res = await fetch('/api/forecast');
+      const f = await res.json();
+      if (!f.ready) return;
+
+      const elDisk = document.getElementById('fcDisk');
+      const elRam = document.getElementById('fcRam');
+      const elCpu = document.getElementById('fcCpu');
+      const elDetail = document.getElementById('fcDetail');
+
+      // Disk
+      if (f.disk.days_to_full) {
+        elDisk.innerHTML = `${f.disk.used_pct}% used · <span style="color:var(--yellow)">~${f.disk.days_to_full}d left</span>`;
+      } else {
+        elDisk.textContent = `${f.disk.used_pct}% used · ${f.disk.free_gb}GB free`;
+      }
+
+      // RAM
+      if (f.ram.days_to_exhaustion) {
+        elRam.innerHTML = `${f.ram.used_pct}% · <span style="color:var(--red)">~${f.ram.days_to_exhaustion}d left</span>`;
+      } else {
+        elRam.textContent = `${f.ram.used_pct}% · ${f.ram.trend}`;
+      }
+
+      // CPU
+      const trendIcon = f.cpu.trend === 'rising' ? '↗️' : f.cpu.trend === 'falling' ? '↘️' : '→';
+      elCpu.textContent = `${trendIcon} ${f.cpu.trend} · avg ${f.cpu.avg_30d}%`;
+
+      // Detail line
+      const parts = [];
+      if (f.disk.r2 >= 30) parts.push(`Disk confidence: ${f.disk.r2}%`);
+      if (f.ram.r2 >= 30) parts.push(`RAM confidence: ${f.ram.r2}%`);
+      if (parts.length > 0) elDetail.textContent = parts.join(' · ');
+    } catch (_) {}
+  }
+
+  // Load on dashboard view
+  const observer = new MutationObserver(() => {
+    const dash = document.getElementById('page-dashboard');
+    if (dash && dash.classList.contains('active')) loadForecast();
+  });
+  observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'] });
+  if (document.getElementById('page-dashboard')?.classList.contains('active')) loadForecast();
+  setInterval(loadForecast, 600000); // refresh every 10 min
 })();
