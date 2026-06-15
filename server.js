@@ -298,37 +298,6 @@ app.get('/api/alerts', requireAuth, (req, res) => {
   res.json(stmts.getAlerts.all(limit));
 });
 
-app.get('/api/alerts/history', requireAuth, (req, res) => {
-  const range = req.query.range || '24h';
-  const now = Math.floor(Date.now() / 1000);
-  const ranges = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
-  const since = now - (ranges[range] || 86400);
-  res.json(stmts.getAlertsSince.all(since));
-});
-
-// --- REST API: SahamRadar Metrics ---
-app.get('/api/sahamradar/metrics', requireAuth, (req, res) => {
-  try {
-    const { execSync } = require('child_process');
-    const DB = '/var/lib/saham-subscription/app.db';
-    const q = (sql) => execSync(`sudo sqlite3 ${DB} "${sql.replace(/"/g,'\\"')}"`, { timeout: 5000 }).toString().trim();
-    const subscribers = q("SELECT COUNT(*) FROM subscriptions;");
-    const users = q("SELECT COUNT(*) FROM users;");
-    const paidOrders = q("SELECT COUNT(*) FROM payment_orders;");
-    const activePlans = q("SELECT group_concat(code||':'||cnt,'|') FROM (SELECT plan_code as code,COUNT(*) as cnt FROM subscriptions GROUP BY plan_code);");
-    const recentUsers = q("SELECT COUNT(*) FROM users WHERE created_at > strftime('%s','now','-7 days') OR created_at > strftime('%s','now','-7 days');");
-    res.json({
-      total_users: parseInt(users) || 0,
-      active_subscribers: parseInt(subscribers) || 0,
-      total_orders: parseInt(paidOrders) || 0,
-      plan_breakdown: activePlans || '',
-      recent_users_7d: parseInt(recentUsers) || 0
-    });
-  } catch (e) {
-    res.json({ error: 'SahamRadar DB unavailable', total_users: 0, active_subscribers: 0, total_orders: 0, plan_breakdown: '', recent_users_7d: 0 });
-  }
-});
-
 app.get('/api/alerts/config', requireAuth, (req, res) => {
   res.json(stmts.getAlertConfig.all());
 });
