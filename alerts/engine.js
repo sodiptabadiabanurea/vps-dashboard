@@ -35,18 +35,18 @@ function reloadConfig() {
 }
 
 // --- Pattern Detection ---
-function isRecurringPattern(type, now) {
-  if (!stmts) return false;
-  // Look at last 7 days of alerts for this type
+// Detects recurring patterns. Does NOT suppress — enriches the alert with context.
+function detectPattern(type, now) {
+  if (!stmts) return null;
   const since = now - 7 * 86400;
   const rows = stmts.getAlertsByTypeSince.all(type, since);
-  if (rows.length < PATTERN_MIN_DAYS) return false;
+  if (rows.length < PATTERN_MIN_DAYS) return null;
 
   const d = new Date(now * 1000);
   const currentMinute = d.getHours() * 60 + d.getMinutes();
   const currentDay = d.getDay();
+  const timeLabel = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
-  // Count how many past alerts happened at similar time (±5 min) on same weekday
   let matches = 0;
   for (const row of rows) {
     const rd = new Date(row.ts * 1000);
@@ -55,7 +55,7 @@ function isRecurringPattern(type, now) {
       matches++;
     }
   }
-  return matches >= PATTERN_MIN_DAYS;
+  return matches >= PATTERN_MIN_DAYS ? timeLabel : null;
 }
 
 // --- Grouping ---
@@ -72,17 +72,21 @@ function flushGroup(type) {
   const label = first.label;
   const threshold = first.threshold;
   const timeStr = new Date(first.ts * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+  const pattern = group.pattern;
+
+  const prefix = pattern ? `📊 Known pattern (${pattern}) — ` : '⚠️ ';
+  const patternEmoji = pattern ? '📊' : '⚠️';
 
   if (alerts.length === 1) {
-    // Single alert — send normally
-    const message = `⚠️ VPS Alert: ${label} at ${maxVal}% (threshold: ${threshold}%)\nServer: ${serverName}\nTime: ${timeStr} WIB`;
-    emitAndStore(type, message, maxVal, threshold, first.ts);
+    // Single alert
+    const message = `${patternEmoji} VPS Alert: ${label} at ${maxVal}% (threshold: ${threshold}%)\nServer: ${serverName}\nTime: ${timeStr} WIB${pattern ? `\nPattern: recurring at ${pattern} — likely stock screener or batch job` : ''}`;
+    emitAndStore(type, message, maxVal, threshold, first.ts, pattern ? { pattern_time: pattern } : null);
   } else {
     // Grouped alert
     const duration = last.ts - first.ts;
     const durationStr = duration < 60 ? `${duration}s` : `${Math.round(duration / 60)}min`;
-    const message = `⚠️ VPS Alert: ${label} spiked ${alerts.length}x in ${durationStr} (peak: ${maxVal}%, threshold: ${threshold}%)\nServer: ${serverName}\nTime: ${timeStr} WIB`;
-    emitAndStore(type, message, maxVal, threshold, first.ts, { count: alerts.length, duration_sec: duration });
+    const message = `${patternEmoji} VPS Alert: ${label} spiked ${alerts.length}x in ${durationStr} (peak: ${maxVal}%, threshold: ${threshold}%)\nServer: ${serverName}\nTime: ${timeStr} WIB${pattern ? `\nPattern: recurring at ${pattern}` : ''}`;
+    emitAndStore(type, message, maxVal, threshold, first.ts, { count: alerts.length, duration_sec: duration, ...(pattern ? { pattern_time: pattern } : {}) });
   }
 
   clearTimeout(group.timer);
@@ -168,19 +172,15 @@ function check(metrics) {
       continue;
     }
 
-    // Pattern check — is this a recurring expected spike?
-    if (isRecurringPattern(type, now)) {
-      const d = new Date(now * 1000);
-      const timeLabel = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      suppressAlert(type, label, value, cfg.threshold, `recurring daily pattern at ${timeLabel}`);
-      continue;
-    }
+    // Pattern check — enrich with context, don't suppress
+    const patternTime = detectPattern(type, now);
 
     // Group: add to group buffer
     if (!groupBuffer[type]) {
-      groupBuffer[type] = { alerts: [], timer: null };
+      groupBuffer[type] = { alerts: [], timer: null, pattern: null };
     }
     groupBuffer[type].alerts.push({ ts: now, value, label, threshold: cfg.threshold });
+    if (patternTime) groupBuffer[type].pattern = patternTime;
 
     // Start group window timer
     if (!groupBuffer[type].timer) {
