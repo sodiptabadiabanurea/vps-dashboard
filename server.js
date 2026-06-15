@@ -367,17 +367,21 @@ app.get('/api/forecast', requireAuth, (_req, res) => {
     // Disk (used_bytes / total)
     const diskReg = regression(rows, xFn, d => d.disk_used);
     const diskPct = rows[rows.length - 1].disk_total > 0 ? (rows[rows.length - 1].disk_used / rows[rows.length - 1].disk_total) * 100 : 0;
+    // Meaningful growth: at least 1 MB/day for disk, 512 KB/day for RAM
+    const MIN_DISK_GROWTH = 1024 * 1024; // 1 MB/day
+    const MIN_RAM_GROWTH = 512 * 1024;   // 512 KB/day
+
     let diskFullDays = null;
-    if (diskReg.slope > 0 && rows[rows.length - 1].disk_total > 0) {
-      const daysToFull = (rows[rows.length - 1].disk_total - rows[rows.length - 1].disk_used) / diskReg.slope / 86400;
+    if (diskReg.slope * 86400 > MIN_DISK_GROWTH && rows[rows.length - 1].disk_total > 0) {
+      const daysToFull = (rows[rows.length - 1].disk_total - rows[rows.length - 1].disk_used) / (diskReg.slope * 86400);
       if (daysToFull > 0 && daysToFull < 3650) diskFullDays = Math.round(daysToFull);
     }
 
     // RAM
     const ramReg = regression(rows, xFn, d => d.ram_used);
     let ramExhaustionDays = null;
-    if (ramReg.slope > 0 && rows[rows.length - 1].ram_total > 0) {
-      const daysToFull = (rows[rows.length - 1].ram_total - rows[rows.length - 1].ram_used) / ramReg.slope / 86400;
+    if (ramReg.slope * 86400 > MIN_RAM_GROWTH && rows[rows.length - 1].ram_total > 0) {
+      const daysToFull = (rows[rows.length - 1].ram_total - rows[rows.length - 1].ram_used) / (ramReg.slope * 86400);
       if (daysToFull > 0 && daysToFull < 3650) ramExhaustionDays = Math.round(daysToFull);
     }
 
@@ -387,7 +391,7 @@ app.get('/api/forecast', requireAuth, (_req, res) => {
 
     // Current values
     const latest = rows[rows.length - 1];
-    const diskFreeGB = ((latest.disk_total - latest.disk_used) / (1024 * 1024)).toFixed(1);
+    const diskFreeGB = ((latest.disk_total - latest.disk_used) / (1024 * 1024 * 1024)).toFixed(1);
     const ramUsedPct = latest.ram_total > 0 ? Math.round((latest.ram_used / latest.ram_total) * 100) : 0;
 
     res.json({
@@ -397,13 +401,13 @@ app.get('/api/forecast', requireAuth, (_req, res) => {
       disk: {
         used_pct: Math.round(diskPct),
         free_gb: parseFloat(diskFreeGB),
-        trend: diskReg.slope * 86400 * 1024 * 1024 >= 1024 ? 'growing' : diskReg.slope * 86400 * 1024 * 1024 <= -1024 ? 'shrinking' : 'stable',
+        trend: diskReg.slope * 86400 > MIN_DISK_GROWTH ? 'growing' : diskReg.slope * 86400 < -MIN_DISK_GROWTH ? 'shrinking' : 'stable',
         days_to_full: diskFullDays,
         r2: Math.round(diskReg.r2 * 100),
       },
       ram: {
         used_pct: ramUsedPct,
-        trend: ramReg.slope * 86400 * 1024 * 1024 >= 512 ? 'growing' : 'stable',
+        trend: ramReg.slope * 86400 > MIN_RAM_GROWTH ? 'growing' : 'stable',
         days_to_exhaustion: ramExhaustionDays,
         r2: Math.round(ramReg.r2 * 100),
       },
