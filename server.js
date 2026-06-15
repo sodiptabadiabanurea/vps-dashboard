@@ -298,6 +298,14 @@ app.get('/api/alerts', requireAuth, (req, res) => {
   res.json(stmts.getAlerts.all(limit));
 });
 
+app.get('/api/alerts/history', requireAuth, (req, res) => {
+  const range = req.query.range || '24h';
+  const now = Math.floor(Date.now() / 1000);
+  const ranges = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
+  const since = now - (ranges[range] || 86400);
+  res.json(stmts.getAlertsSince.all(since));
+});
+
 app.get('/api/alerts/config', requireAuth, (req, res) => {
   res.json(stmts.getAlertConfig.all());
 });
