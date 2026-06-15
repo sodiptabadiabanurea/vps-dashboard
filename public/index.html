@@ -237,6 +237,33 @@
           </table>
           <a href="#" class="card-link" data-page="processes">View all processes →</a>
         </div>
+
+        <!-- SahamRadar Metrics Card -->
+        <div class="card">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            SahamRadar
+          </h2>
+          <div class="saham-grid" id="sahamMetrics">
+            <div class="saham-stat">
+              <span class="saham-num" id="srUsers">—</span>
+              <span class="saham-label">Total Users</span>
+            </div>
+            <div class="saham-stat">
+              <span class="saham-num" id="srSubs">—</span>
+              <span class="saham-label">Subscribers</span>
+            </div>
+            <div class="saham-stat">
+              <span class="saham-num" id="srOrders">—</span>
+              <span class="saham-label">Orders</span>
+            </div>
+            <div class="saham-stat">
+              <span class="saham-num" id="srRecent">—</span>
+              <span class="saham-label">New (7d)</span>
+            </div>
+          </div>
+          <div id="srPlans" class="saham-plans"></div>
+        </div>
       </div>
     </div>
 
@@ -607,6 +634,7 @@
   <script src="/js/charts.js"></script>
   <script src="/js/processes.js"></script>
   <script src="/js/alerts.js"></script>
+  <script src="/js/sahamradar.js"></script>
   <script src="/js/terminal.js"></script>
   <script src="/js/docker.js"></script>
   <script src="/js/files.js"></script>
