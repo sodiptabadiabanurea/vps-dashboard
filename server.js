@@ -115,6 +115,7 @@ const { setupTerminal } = require('./terminal');
 const { setupDockerRoutes } = require('./docker');
 const { setupFileManagerRoutes } = require('./filemanager');
 const { initUptimeTables, startChecker, setupUptimeRoutes } = require('./uptime');
+const { initTimeline, record, setupTimelineRoutes, ICONS } = require('./modules/timeline');
 
 // --- Additional modules ---
 const { setupLogRoutes } = require('./modules/logs');
@@ -320,6 +321,18 @@ app.put('/api/alerts/config/:type', requireAuth, (req, res) => {
 
 // --- Alert engine callback ---
 alertEngine.init(stmts, io);
+initTimeline(stmts, io);
+
+// --- Hook alert events into timeline ---
+const origAlertInsert = stmts.insertAlert;
+stmts.insertAlert = new Proxy(origAlertInsert, {
+  apply(target, thisArg, args) {
+    const result = target.apply(thisArg, args);
+    const [ts, type, message, value, threshold] = args;
+    record(`alert_${type}`, 'alert', `${type.toUpperCase()} at ${value}%`, message, 'alert-engine', { value, threshold });
+    return result;
+  }
+});
 initAuditTables(db);
 initAudit(stmts);
 
@@ -334,7 +347,19 @@ setupFileManagerRoutes(app, requireAuth);
 
 // --- Uptime Monitor ---
 setupUptimeRoutes(app, requireAuth, stmts);
+
+// --- Incident Timeline ---
+setupTimelineRoutes(app, requireAuth);
 startChecker(stmts, io);
+
+// Hook uptime failures into timeline
+io.on('connection', (socket) => {
+  socket.on('uptime-check', (data) => {
+    if (data.status === 0 || data.status >= 500) {
+      record('uptime_down', 'uptime', `Target ${data.target_id} DOWN`, `HTTP ${data.status}: ${data.error || 'unreachable'}`, 'uptime-checker', { target_id: data.target_id, status: data.status });
+    }
+  });
+});
 
 // --- Additional modules ---
 setupLogRoutes(app, requireAuth);

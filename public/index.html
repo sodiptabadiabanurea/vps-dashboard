@@ -68,6 +68,12 @@
       </svg>
       Alerts
     </button>
+    <button class="nav-btn" data-page="timeline">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="2" x2="12" y2="22"/><polyline points="8,6 12,2 16,6"/><polyline points="8,18 12,22 16,18"/>
+      </svg>
+      Timeline
+    </button>
     <button class="nav-btn" data-page="terminal">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/>
@@ -319,6 +325,30 @@
           <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Ctrl+C to interrupt</span>
         </h2>
         <div id="terminal-container" style="background:#000;border-radius:8px;overflow:hidden;height:500px;"></div>
+      </div>
+    </div>
+
+    <!-- Timeline Page -->
+    <div class="page" id="page-timeline">
+      <div class="card">
+        <div class="timeline-header">
+          <h2 class="card-title" style="margin-bottom:0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><polyline points="8,6 12,2 16,6"/><polyline points="8,18 12,22 16,18"/></svg>
+            Incident Timeline
+          </h2>
+          <div class="timeline-controls">
+            <select class="sort-select" id="timelineRange">
+              <option value="1h">Last 1h</option>
+              <option value="6h">Last 6h</option>
+              <option value="24h" selected>Last 24h</option>
+              <option value="7d">Last 7d</option>
+            </select>
+            <div class="timeline-filters" id="timelineFilters"></div>
+          </div>
+        </div>
+        <div id="timelineFeed" class="timeline-feed">
+          <p class="empty-state">Loading timeline...</p>
+        </div>
       </div>
     </div>
 
@@ -607,6 +637,7 @@
   <script src="/js/charts.js"></script>
   <script src="/js/processes.js"></script>
   <script src="/js/alerts.js"></script>
+  <script src="/js/timeline.js"></script>
   <script src="/js/terminal.js"></script>
   <script src="/js/docker.js"></script>
   <script src="/js/files.js"></script>

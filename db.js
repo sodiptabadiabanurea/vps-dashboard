@@ -99,6 +99,20 @@ db.exec(`
     enabled INTEGER DEFAULT 0,
     webhook_url TEXT DEFAULT ''
   );
+
+  CREATE TABLE IF NOT EXISTS timeline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT,
+    source TEXT,
+    metadata TEXT DEFAULT '{}'
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_timeline_ts ON timeline_events (ts);
+  CREATE INDEX IF NOT EXISTS idx_timeline_category ON timeline_events (category, ts);
 `);
 
 // --- Seed alert config from defaults ---
@@ -188,6 +202,12 @@ const stmts = {
   getNotifConfig: db.prepare(`SELECT * FROM notification_channels`),
   getNotifConfigByType: db.prepare(`SELECT * FROM notification_channels WHERE type = ?`),
   updateNotifConfig: db.prepare(`UPDATE notification_channels SET enabled = ?, webhook_url = ? WHERE type = ?`),
+
+  // Timeline
+  insertTimelineEvent: db.prepare(`INSERT INTO timeline_events (ts, type, category, title, detail, source, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+  getTimelineSince: db.prepare(`SELECT * FROM timeline_events WHERE ts >= ? ORDER BY ts DESC LIMIT ?`),
+  getTimelineByCategory: db.prepare(`SELECT * FROM timeline_events WHERE ts >= ? AND category = ? ORDER BY ts DESC LIMIT ?`),
+  deleteOldTimeline: db.prepare(`DELETE FROM timeline_events WHERE ts < ?`),
 };
 
 // --- Cleanup old data periodically ---
