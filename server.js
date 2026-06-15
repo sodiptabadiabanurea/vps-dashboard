@@ -316,7 +316,10 @@ app.put('/api/alerts/config/:type', requireAuth, (req, res) => {
   const { enabled, threshold, cooldown } = req.body;
   stmts.updateAlertConfig.run(enabled ? 1 : 0, threshold, cooldown, type);
   alertEngine.reloadConfig();
-  res.json({ ok: true });
+});
+
+app.get('/api/alerts/suppression', requireAuth, (_req, res) => {
+  res.json(alertEngine.getSuppressionStats());
 });
 
 // --- Alert engine callback ---
@@ -335,6 +338,13 @@ stmts.insertAlert = new Proxy(origAlertInsert, {
 });
 initAuditTables(db);
 initAudit(stmts);
+
+// Hook suppressed alerts into timeline
+io.on('connection', (socket) => {
+  socket.on('alert-suppressed', (data) => {
+    record(`suppressed_${data.type}`, 'alert', `${data.type.toUpperCase()} alert suppressed`, `${data.reason} — ${data.value}% (threshold: ${data.threshold}%)`, 'alert-engine', data);
+  });
+});
 
 // --- Terminal ---
 setupTerminal(io);

@@ -156,6 +156,10 @@ const stmts = {
     SELECT * FROM alerts WHERE ts >= ? ORDER BY ts DESC LIMIT 200
   `),
 
+  getAlertsByTypeSince: db.prepare(`
+    SELECT ts FROM alerts WHERE type = ? AND ts >= ? ORDER BY ts ASC
+  `),
+
   getAlertConfig: db.prepare(`
     SELECT * FROM alert_config
   `),
