@@ -4,7 +4,11 @@
   let termSocket = null;
 
   function initTerminal() {
-    if (term) return;
+    if (term) {
+      if (termSocket && !termSocket.connected) termSocket.connect();
+      term.focus();
+      return;
+    }
 
     const container = document.getElementById('terminal-container');
     if (!container) return;
@@ -21,7 +25,13 @@
       const fitAddon = document.createElement('script');
       fitAddon.src = 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10/lib/addon-fit.min.js';
       fitAddon.onload = () => setupXterm(container);
+      fitAddon.onerror = () => {
+        container.textContent = 'Failed to load terminal fit addon. Refresh the page.';
+      };
       document.head.appendChild(fitAddon);
+    };
+    script.onerror = () => {
+      container.textContent = 'Failed to load terminal library. Refresh the page.';
     };
     document.head.appendChild(script);
   }
@@ -62,8 +72,10 @@
       term.open(container);
     }
 
+    term.write('Connecting to server...\r\n');
+
     // Get auth token — wait for it if not yet available
-    let token = getBasicAuthToken ? getBasicAuthToken() : null;
+    let token = typeof getBasicAuthToken === 'function' ? getBasicAuthToken() : null;
     if (!token) {
       try {
         const res = await fetch('/api/session');
@@ -74,21 +86,50 @@
       } catch (e) {}
     }
 
-    const authOpts = {};
-    if (token) authOpts.auth = { token };
+    if (!token) {
+      term.write('\r\n\x1b[31mMissing auth token. Refresh this page, then open Terminal again.\x1b[0m\r\n');
+      return;
+    }
+
+    const authOpts = {
+      auth: { token },
+      forceNew: true,
+      timeout: 8000,
+      reconnectionAttempts: 3,
+    };
 
     termSocket = io('/terminal', authOpts);
 
-    termSocket.on('output', (data) => term.write(data));
+    let receivedOutput = false;
+
+    termSocket.on('connect', () => {
+      term.write('\r\n\x1b[32mConnected. Starting shell...\x1b[0m\r\n');
+      // Some mobile browsers miss/paint over the first PTY prompt. Send a safe
+      // newline if no output appears shortly after connect to force a prompt.
+      setTimeout(() => {
+        if (!receivedOutput && termSocket && termSocket.connected) {
+          termSocket.emit('input', '\r');
+        }
+      }, 1200);
+    });
+
+    termSocket.on('output', (data) => {
+      receivedOutput = true;
+      term.write(data);
+    });
     termSocket.on('exit', () => term.write('\r\n[Process exited]\r\n'));
     termSocket.on('connect_error', (err) => {
       term.write(`\r\n\x1b[31mConnection error: ${err.message}\x1b[0m\r\n`);
+    });
+    termSocket.on('disconnect', (reason) => {
+      if (reason !== 'io client disconnect') {
+        term.write(`\r\n\x1b[33mDisconnected: ${reason}\x1b[0m\r\n`);
+      }
     });
 
     term.onData((data) => termSocket.emit('input', data));
     term.onResize(({ cols, rows }) => termSocket.emit('resize', { cols, rows }));
 
-    term.write('Connecting to server...\r\n');
   }
 
   window.initTerminal = initTerminal;

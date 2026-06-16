@@ -1,72 +1,99 @@
 // Tools - Network, SSL, Cron, Backup
 (function() {
+  function getOutput(data, field = 'output') {
+    return data[field] || data.error || 'No output';
+  }
+
+  async function fetchJson(url, targetId, loadingText) {
+    const target = document.getElementById(targetId);
+    if (target) target.textContent = loadingText;
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json().catch(() => ({ error: `HTTP ${res.status}: Invalid JSON response` }));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    } catch (err) {
+      if (target) target.textContent = `Error: ${err.message}`;
+      return null;
+    }
+  }
+
   async function runPing() {
     const host = document.getElementById('pingHost').value.trim();
     if (!host) return;
-    document.getElementById('pingResult').textContent = 'Pinging...';
-    const res = await fetch(`/api/tools/ping?host=${encodeURIComponent(host)}`);
-    const data = await res.json();
-    document.getElementById('pingResult').textContent = data.output;
+    const data = await fetchJson(`/api/tools/ping?host=${encodeURIComponent(host)}`, 'pingResult', 'Pinging...');
+    if (data) document.getElementById('pingResult').textContent = getOutput(data);
   }
 
   async function runTraceroute() {
     const host = document.getElementById('traceHost').value.trim();
     if (!host) return;
-    document.getElementById('traceResult').textContent = 'Tracing...';
-    const res = await fetch(`/api/tools/traceroute?host=${encodeURIComponent(host)}`);
-    const data = await res.json();
-    document.getElementById('traceResult').textContent = data.output;
+    const data = await fetchJson(`/api/tools/traceroute?host=${encodeURIComponent(host)}`, 'traceResult', 'Tracing...');
+    if (data) document.getElementById('traceResult').textContent = getOutput(data);
   }
 
   async function runDns() {
     const host = document.getElementById('dnsHost').value.trim();
     const type = document.getElementById('dnsType').value;
     if (!host) return;
-    document.getElementById('dnsResult').textContent = 'Looking up...';
-    const res = await fetch(`/api/tools/dns?host=${encodeURIComponent(host)}&type=${type}`);
-    const data = await res.json();
-    document.getElementById('dnsResult').textContent = data.result.join('\n');
+    const data = await fetchJson(`/api/tools/dns?host=${encodeURIComponent(host)}&type=${encodeURIComponent(type)}`, 'dnsResult', 'Looking up...');
+    if (data) {
+      const lines = Array.isArray(data.result) ? data.result : [];
+      document.getElementById('dnsResult').textContent = lines.length ? lines.join('\n') : 'No records found';
+    }
   }
 
   async function runPortscan() {
     const host = document.getElementById('portHost').value.trim();
     if (!host) return;
-    document.getElementById('portResult').textContent = 'Scanning...';
-    const res = await fetch(`/api/tools/portscan?host=${encodeURIComponent(host)}`);
-    const data = await res.json();
-    document.getElementById('portResult').textContent = data.ports.map(p => `Port ${p.port}: ${p.status}`).join('\n');
+    const data = await fetchJson(`/api/tools/portscan?host=${encodeURIComponent(host)}`, 'portResult', 'Scanning...');
+    if (data) {
+      const ports = Array.isArray(data.ports) ? data.ports : [];
+      document.getElementById('portResult').textContent = ports.length
+        ? ports.map(p => `Port ${p.port}: ${p.status}`).join('\n')
+        : getOutput(data);
+    }
   }
 
   async function loadSSL() {
-    const res = await fetch('/api/ssl');
-    const certs = await res.json();
-    const container = document.getElementById('sslCerts');
-    container.innerHTML = certs.map(c => {
-      if (c.error) return `<div class="stat-row"><span class="stat-label">${c.domain}</span><span style="color:var(--red)">${c.error}</span></div>`;
-      const color = c.daysLeft < 7 ? 'var(--red)' : c.daysLeft < 30 ? 'var(--yellow)' : 'var(--accent)';
-      return `
-        <div class="stat-row">
-          <span class="stat-label">${c.domain}</span>
-          <span style="color:${color};font-weight:600">${c.daysLeft} days left</span>
-        </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;padding-left:12px">
-          Issuer: ${c.issuer} | Expires: ${new Date(c.validTo).toLocaleDateString('id-ID')}
-        </div>
-      `;
-    }).join('');
+    try {
+      const res = await fetch('/api/ssl');
+      const certs = await res.json();
+      const container = document.getElementById('sslCerts');
+      container.innerHTML = certs.map(c => {
+        if (c.error) return `<div class="stat-row"><span class="stat-label">${c.domain}</span><span style="color:var(--red)">${c.error}</span></div>`;
+        const color = c.daysLeft < 7 ? 'var(--red)' : c.daysLeft < 30 ? 'var(--yellow)' : 'var(--accent)';
+        return `
+          <div class="stat-row">
+            <span class="stat-label">${c.domain}</span>
+            <span style="color:${color};font-weight:600">${c.daysLeft} days left</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;padding-left:12px">
+            Issuer: ${c.issuer} | Expires: ${new Date(c.validTo).toLocaleDateString('id-ID')}
+          </div>
+        `;
+      }).join('');
+    } catch (err) {
+      document.getElementById('sslCerts').textContent = `Error: ${err.message}`;
+    }
   }
 
   async function loadCron() {
-    const res = await fetch('/api/cron');
-    const data = await res.json();
-    const container = document.getElementById('cronJobs');
-    let output = '=== User Crontab ===\n' + (data.user || 'No crontab') + '\n\n';
-    output += '=== System Crontab ===\n' + (data.system || 'Empty') + '\n';
-    if (data.cronD && data.cronD.length) {
-      output += '\n=== /etc/cron.d/ ===\n';
-      for (const f of data.cronD) output += `\n--- ${f.file} ---\n${f.content}\n`;
+    try {
+      const res = await fetch('/api/cron');
+      const data = await res.json();
+      const container = document.getElementById('cronJobs');
+      let output = '=== User Crontab ===\n' + (data.user || 'No crontab') + '\n\n';
+      output += '=== System Crontab ===\n' + (data.system || 'Empty') + '\n';
+      if (data.cronD && data.cronD.length) {
+        output += '\n=== /etc/cron.d/ ===\n';
+        for (const f of data.cronD) output += `\n--- ${f.file} ---\n${f.content}\n`;
+      }
+      container.textContent = output;
+    } catch (err) {
+      document.getElementById('cronJobs').textContent = `Error: ${err.message}`;
     }
-    container.textContent = output;
   }
 
   async function loadBackups() {

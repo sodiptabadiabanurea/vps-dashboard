@@ -21,6 +21,12 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+      // The current dashboard still uses inline onclick/onchange handlers in several
+      // feature pages. Helmet's default CSP3 `script-src-attr 'none'` blocks those
+      // handlers even when `script-src` includes `unsafe-inline`, which made Tools
+      // buttons look clickable but do nothing. Keep this explicit until the UI is
+      // migrated to addEventListener-only handlers.
+      scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
       imgSrc: ["'self'", "data:"],
@@ -440,11 +446,18 @@ app.get('/api/forecast', requireAuth, (_req, res) => {
 // --- Hook alert events into timeline ---
 const origAlertInsert = stmts.insertAlert;
 stmts.insertAlert = new Proxy(origAlertInsert, {
-  apply(target, thisArg, args) {
-    const result = target.apply(thisArg, args);
-    const [ts, type, message, value, threshold] = args;
-    record(`alert_${type}`, 'alert', `${type.toUpperCase()} at ${value}%`, message, 'alert-engine', { value, threshold });
-    return result;
+  get(target, prop, receiver) {
+    if (prop === 'run') {
+      return (...args) => {
+        const result = target.run(...args);
+        const [ts, type, message, value, threshold] = args;
+        record(`alert_${type}`, 'alert', `${type.toUpperCase()} at ${value}%`, message, 'alert-engine', { value, threshold });
+        return result;
+      };
+    }
+
+    const value = Reflect.get(target, prop, receiver);
+    return typeof value === 'function' ? value.bind(target) : value;
   }
 });
 initAuditTables(db);
