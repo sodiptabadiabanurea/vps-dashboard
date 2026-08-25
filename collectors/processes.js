@@ -8,9 +8,16 @@ function runCmd(cmd, timeout = 10000) {
   });
 }
 
+function isObserverNoise(command) {
+  const value = String(command || '').toLowerCase();
+  return value.includes('ps aux --sort=-%cpu') ||
+    (value.includes('du -sh /home/') && value.includes('/var/log /tmp')) ||
+    (value.includes('apt list --upgradable') && value.includes('grep -c security'));
+}
+
 module.exports = async function processesCollector() {
   try {
-    const ps = await runCmd('ps aux --sort=-%cpu | head -16 | tail -15');
+    const ps = await runCmd('ps aux --sort=-%cpu | head -31 | tail -30');
 
     const processes = [];
     for (const line of ps.trim().split('\n')) {
@@ -23,6 +30,7 @@ module.exports = async function processesCollector() {
       const rss = parseInt(parts[5], 10) * 1024;
       const cmd = parts.slice(10).join(' ');
       const name = parts[10].split('/').pop();
+      if (isObserverNoise(cmd)) continue;
 
       // Get process uptime
       let uptime = '';
@@ -53,6 +61,7 @@ module.exports = async function processesCollector() {
       }
 
       processes.push({ pid, name, cpu, mem, rss, state, uptime, cmd });
+      if (processes.length >= 15) break;
     }
 
     return processes;
@@ -60,3 +69,5 @@ module.exports = async function processesCollector() {
     return [];
   }
 };
+
+module.exports.isObserverNoise = isObserverNoise;

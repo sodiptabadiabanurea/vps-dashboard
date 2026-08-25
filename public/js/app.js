@@ -1,5 +1,20 @@
 // Main app controller — navigation, dialogs, toasts
 (function() {
+  function markActiveNav(page) {
+    document.querySelectorAll('.nav-btn').forEach(button => {
+      const isActive = button.dataset.page === page;
+      button.classList.toggle('active', isActive);
+      if (isActive) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+
+    const activeButton = document.querySelector(`.nav-btn[data-page="${page}"]`);
+    if (activeButton && window.matchMedia('(max-width: 768px)').matches) {
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      activeButton.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }
+
   // Navigation
   document.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -7,8 +22,7 @@
       const page = btn.dataset.page;
 
       // Update nav buttons
-      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      document.querySelector(`.nav-btn[data-page="${page}"]`)?.classList.add('active');
+      markActiveNav(page);
 
       // Update pages
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -25,8 +39,12 @@
       if (page === 'security' && window.loadSecurity) window.loadSecurity();
       if (page === 'logs' && window.loadLogs) { window.loadLogs(); window.startLogFollow?.(); }
       if (page !== 'logs' && window.stopLogFollow) window.stopLogFollow();
+
+      document.dispatchEvent(new CustomEvent('vps:pagechange', { detail: { page } }));
     });
   });
+
+  markActiveNav(document.querySelector('.page.active')?.id.replace('page-', '') || 'dashboard');
 
   // Theme toggle
   document.getElementById('themeToggle')?.addEventListener('click', window.toggleTheme);

@@ -33,8 +33,21 @@
   --gauge-track: #1a1a2e;
   --progress-bg: #333;
 
-  --chart-grid: #252540;
-  --chart-text: #888;
+  --chart-cpu: #4ade80;
+  --chart-ram: #60a5fa;
+  --chart-disk: #fbbf24;
+  --chart-swap: #fb923c;
+  --chart-rx: #22d3ee;
+  --chart-tx: #f472b6;
+  --chart-threshold: #f59e0b;
+  --chart-incident: #fb7185;
+  --chart-grid: rgba(148, 163, 184, 0.14);
+  --chart-text: #a7adbf;
+  --chart-fill: rgba(74, 222, 128, 0.14);
+  --chart-panel: #141424;
+  --chart-panel-raised: #1d1d33;
+  --chart-panel-border: #34344c;
+  --chart-atmosphere: rgba(74, 222, 128, 0.08);
 }
 
 /* === Light Theme === */
@@ -71,6 +84,19 @@
   --gauge-track: #e5e7eb;
   --progress-bg: #d1d5db;
 
-  --chart-grid: #e5e7eb;
-  --chart-text: #999;
+  --chart-cpu: #15803d;
+  --chart-ram: #1d4ed8;
+  --chart-disk: #a16207;
+  --chart-swap: #c2410c;
+  --chart-rx: #0e7490;
+  --chart-tx: #be185d;
+  --chart-threshold: #b45309;
+  --chart-incident: #be123c;
+  --chart-grid: rgba(71, 85, 105, 0.16);
+  --chart-text: #5b6475;
+  --chart-fill: rgba(21, 128, 61, 0.12);
+  --chart-panel: #ffffff;
+  --chart-panel-raised: #f8fafc;
+  --chart-panel-border: #d7dce5;
+  --chart-atmosphere: rgba(21, 128, 61, 0.07);
 }

@@ -143,6 +143,50 @@ const stmts = {
     SELECT * FROM metrics WHERE ts >= ? ORDER BY ts ASC
   `),
 
+  getChartHistory: db.prepare(`
+    SELECT ts, cpu, ram_used, ram_total, swap_used, swap_total,
+           disk_used, disk_total, net_rx, net_tx
+    FROM metrics
+    WHERE ts >= ? AND ts <= ?
+    ORDER BY ts ASC
+  `),
+
+  getChartIncidents: db.prepare(`
+    WITH classified AS (
+      SELECT id, ts, type, message, value, threshold,
+             CASE
+               WHEN lower(type) = 'cpu' OR lower(type) LIKE 'cpu_%' OR lower(type) LIKE '%cpu%' THEN 'cpu'
+               WHEN lower(type) = 'ram' OR lower(type) LIKE 'ram_%' OR lower(type) LIKE '%ram%' THEN 'ram'
+               WHEN lower(type) = 'disk' OR lower(type) LIKE 'disk_%' OR lower(type) LIKE '%disk%' THEN 'disk'
+               WHEN lower(type) = 'swap' OR lower(type) LIKE 'swap_%' OR lower(type) LIKE '%swap%' THEN 'swap'
+               WHEN lower(type) = 'network' OR lower(type) LIKE 'net_%' OR lower(type) LIKE '%network%' THEN 'network'
+               ELSE NULL
+             END AS metric
+      FROM alerts
+      WHERE ts >= ? AND ts <= ?
+    ), ranked AS (
+      SELECT *,
+             ROW_NUMBER() OVER (PARTITION BY metric ORDER BY ts DESC, id DESC) AS metric_rank,
+             COUNT(*) OVER (PARTITION BY metric) AS metric_total
+      FROM classified
+      WHERE metric IS NOT NULL
+    ), selected AS (
+      SELECT *
+      FROM ranked
+      ORDER BY CASE WHEN metric_rank = 1 THEN 0 ELSE 1 END, ts DESC, id DESC
+      LIMIT 500
+    )
+    SELECT id, ts, type, message, value, threshold, metric, metric_total
+    FROM selected
+    ORDER BY ts DESC, id DESC
+  `),
+
+  getChartThresholds: db.prepare(`
+    SELECT type, enabled, threshold
+    FROM alert_config
+    WHERE type IN ('cpu', 'ram', 'disk', 'swap')
+  `),
+
   getMetricsRange: db.prepare(`
     SELECT ts, cpu, ram_used, ram_total, disk_used, disk_total, swap_used, swap_total
     FROM metrics WHERE ts >= ? ORDER BY ts ASC
@@ -190,6 +234,7 @@ const stmts = {
   insertUptimeCheck: db.prepare(`INSERT INTO uptime_checks (target_id, ts, status, response_ms, error) VALUES (?, ?, ?, ?, ?)`),
   getUptimeChecks: db.prepare(`SELECT * FROM uptime_checks WHERE target_id = ? AND ts >= ? ORDER BY ts ASC`),
   getLastUptimeCheck: db.prepare(`SELECT * FROM uptime_checks WHERE target_id = ? AND status = ? ORDER BY ts DESC LIMIT 1`),
+  getLatestUptimeCheck: db.prepare(`SELECT * FROM uptime_checks WHERE target_id = ? ORDER BY ts DESC, id DESC LIMIT 1`),
 
   // Login history
   insertLogin: db.prepare(`INSERT INTO login_history (ts, ip, user_agent, success) VALUES (?, ?, ?, ?)`),
@@ -214,8 +259,8 @@ const stmts = {
 
   // Timeline
   insertTimelineEvent: db.prepare(`INSERT INTO timeline_events (ts, type, category, title, detail, source, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`),
-  getTimelineSince: db.prepare(`SELECT * FROM timeline_events WHERE ts >= ? ORDER BY ts DESC LIMIT ?`),
-  getTimelineByCategory: db.prepare(`SELECT * FROM timeline_events WHERE ts >= ? AND category = ? ORDER BY ts DESC LIMIT ?`),
+  getTimelineSince: db.prepare(`SELECT * FROM timeline_events WHERE ts >= ? ORDER BY ts DESC, id DESC LIMIT ?`),
+  getTimelineByCategory: db.prepare(`SELECT * FROM timeline_events WHERE ts >= ? AND category = ? ORDER BY ts DESC, id DESC LIMIT ?`),
   deleteOldTimeline: db.prepare(`DELETE FROM timeline_events WHERE ts < ?`),
 };
 
@@ -224,6 +269,7 @@ function cleanup() {
   const cutoff = Math.floor(Date.now() / 1000) - (config.historyRetentionDays * 86400);
   stmts.deleteOldMetrics.run(cutoff);
   stmts.deleteOldAlerts.run(cutoff);
+  stmts.deleteOldTimeline.run(cutoff);
 }
 setInterval(cleanup, 3600000); // every hour
 cleanup();

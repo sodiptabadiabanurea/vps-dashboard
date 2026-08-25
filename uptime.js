@@ -3,6 +3,21 @@ const config = require('./config');
 
 let stmts = null;
 let io = null;
+let timelineRecord = null;
+const targetFlights = new Map();
+
+function isFailureStatus(status) {
+  return status === 0 || status >= 500;
+}
+
+function classifyUptimeTransition(previousStatus, currentStatus) {
+  if (previousStatus == null) return isFailureStatus(currentStatus) ? 'down' : null;
+  const wasFailure = isFailureStatus(previousStatus);
+  const isFailure = isFailureStatus(currentStatus);
+  if (!wasFailure && isFailure) return 'down';
+  if (wasFailure && !isFailure) return 'recovered';
+  return null;
+}
 
 function initUptimeTables(db) {
   db.exec(`
@@ -50,49 +65,89 @@ async function checkUrl(url, timeout = 10000) {
   }
 }
 
-function startChecker(dbStmts, socketIo) {
+function createSingleFlight(task) {
+  let running = null;
+  return function run() {
+    if (running) return running;
+    running = Promise.resolve()
+      .then(task)
+      .finally(() => { running = null; });
+    return running;
+  };
+}
+
+async function runTargetCheck(dbStmts, target, emitUpdate = true) {
+  const result = await checkUrl(target.url);
+  const now = Math.floor(Date.now() / 1000);
+  const previous = dbStmts.getLatestUptimeCheck.get(target.id);
+  dbStmts.insertUptimeCheck.run(target.id, now, result.status, result.response_ms, result.error);
+
+  if (emitUpdate && io) {
+    io.emit('uptime-check', {
+      target_id: target.id,
+      status: result.status,
+      response_ms: result.response_ms,
+      error: result.error,
+      ts: now,
+    });
+  }
+
+  const transition = classifyUptimeTransition(previous?.status, result.status);
+  if (transition === 'down') {
+    timelineRecord?.(
+      'uptime_down',
+      'uptime',
+      `${target.name} is DOWN`,
+      result.error || `HTTP ${result.status}`,
+      'uptime-checker',
+      { target_id: target.id, status: result.status, response_ms: result.response_ms }
+    );
+    const msg = `🔴 Uptime Alert: ${target.name} is DOWN (${result.error || 'HTTP ' + result.status})`;
+    if (io) io.emit('alert', { type: 'uptime', message: msg, ts: now });
+  } else if (transition === 'recovered') {
+    timelineRecord?.(
+      'uptime_recovered',
+      'uptime',
+      `${target.name} restored`,
+      `HTTP ${result.status} in ${result.response_ms}ms`,
+      'uptime-checker',
+      { target_id: target.id, status: result.status, response_ms: result.response_ms }
+    );
+  }
+  return result;
+}
+
+function runTargetCheckSingleFlight(dbStmts, target, emitUpdate = true) {
+  const key = String(target.id);
+  if (targetFlights.has(key)) return targetFlights.get(key);
+  const flight = runTargetCheck(dbStmts, target, emitUpdate)
+    .finally(() => targetFlights.delete(key));
+  targetFlights.set(key, flight);
+  return flight;
+}
+
+function startChecker(dbStmts, socketIo, recordEvent) {
   stmts = dbStmts;
   io = socketIo;
+  timelineRecord = typeof recordEvent === 'function' ? recordEvent : null;
 
-  // Check all enabled targets every 60 seconds
-  setInterval(async () => {
+  const runCycle = createSingleFlight(async () => {
     const targets = dbStmts.getUptimeTargets.all().filter(t => t.enabled);
     for (const target of targets) {
-      const result = await checkUrl(target.url);
-      const now = Math.floor(Date.now() / 1000);
-      dbStmts.insertUptimeCheck.run(target.id, now, result.status, result.response_ms, result.error);
-
-      // Emit update
-      if (io) {
-        io.emit('uptime-check', {
-          target_id: target.id,
-          status: result.status,
-          response_ms: result.response_ms,
-          error: result.error,
-          ts: now,
-        });
-      }
-
-      // Alert on failure
-      if (result.status === 0 || result.status >= 500) {
-        const lastOk = dbStmts.getLastUptimeCheck.get(target.id, 200);
-        if (!lastOk || lastOk.status !== result.status) {
-          const msg = `🔴 Uptime Alert: ${target.name} is DOWN (${result.error || 'HTTP ' + result.status})`;
-          if (io) io.emit('alert', { type: 'uptime', message: msg, ts: now });
-        }
-      }
+      await runTargetCheckSingleFlight(dbStmts, target, true);
     }
-  }, 60000);
+  });
 
-  // Initial check on startup
-  setTimeout(async () => {
-    const targets = dbStmts.getUptimeTargets.all().filter(t => t.enabled);
-    for (const target of targets) {
-      const result = await checkUrl(target.url);
-      const now = Math.floor(Date.now() / 1000);
-      dbStmts.insertUptimeCheck.run(target.id, now, result.status, result.response_ms, result.error);
+  async function scheduleNext() {
+    try {
+      await runCycle();
+    } catch (error) {
+      console.error('Uptime checker cycle error:', error.message);
+    } finally {
+      setTimeout(scheduleNext, 60000);
     }
-  }, 5000);
+  }
+  setTimeout(scheduleNext, 5000);
 }
 
 function setupUptimeRoutes(app, requireAuth, dbStmts) {
@@ -135,11 +190,9 @@ function setupUptimeRoutes(app, requireAuth, dbStmts) {
   app.post('/api/uptime/check/:id', requireAuth, async (req, res) => {
     const target = dbStmts.getUptimeTargetById.get(parseInt(req.params.id));
     if (!target) return res.status(404).json({ error: 'Target not found' });
-    const result = await checkUrl(target.url);
-    const now = Math.floor(Date.now() / 1000);
-    dbStmts.insertUptimeCheck.run(target.id, now, result.status, result.response_ms, result.error);
+    const result = await runTargetCheckSingleFlight(dbStmts, target, true);
     res.json({ ok: true, ...result });
   });
 }
 
-module.exports = { initUptimeTables, startChecker, setupUptimeRoutes };
+module.exports = { initUptimeTables, startChecker, setupUptimeRoutes, classifyUptimeTransition, createSingleFlight };

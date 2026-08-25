@@ -1,19 +1,23 @@
 // Network Tools - ping, traceroute, DNS lookup, basic port scan
-const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const net = require('net');
+const {
+  runDnsDiagnostic,
+  runNetworkDiagnosis,
+  runPingDiagnostic,
+  runPortScanDiagnostic,
+  runTraceDiagnostic,
+} = require('./network-diagnostics');
+const {
+  ToolInputError,
+  commandOutput,
+  createOperationLimiter,
+  createRequestId,
+  normalizeTarget,
+  runCommand,
+} = require('./network-tools-core');
 
 const DEFAULT_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
-
-function runCmd(cmd, args, timeout = 30000) {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { timeout, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      const output = [stdout, stderr].filter(Boolean).join('\n').trim();
-      resolve(output || (err ? err.message : ''));
-    });
-  });
-}
 
 function findExecutable(candidates) {
   const dirs = (process.env.PATH || DEFAULT_PATH).split(':').filter(Boolean);
@@ -39,91 +43,186 @@ function findExecutable(candidates) {
   return null;
 }
 
-function sanitize(input) {
-  return String(input || '').replace(/[^a-zA-Z0-9._:-]/g, '');
-}
-
-function sanitizeRecordType(input) {
-  const type = sanitize(input || 'A').toUpperCase();
-  const allowed = new Set(['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'CAA']);
-  return allowed.has(type) ? type : 'A';
-}
-
-function checkPort(host, port, timeout = 2000) {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    let settled = false;
-
-    const finish = (status) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve({ port, status });
-    };
-
-    socket.setTimeout(timeout);
-    socket.once('connect', () => finish('open'));
-    socket.once('timeout', () => finish('filtered'));
-    socket.once('error', () => finish('closed'));
-    socket.connect(port, host);
+function sendRouteError(res, error, requestId, tool) {
+  const status = Number(error.statusCode) || 500;
+  return res.status(status).json({
+    schema_version: 2,
+    request_id: requestId,
+    tool,
+    ok: false,
+    status: 'error',
+    error: status >= 500 ? 'Network diagnostic failed.' : error.message,
+    diagnosis: {
+      code: error.code || 'TOOL_ERROR',
+      severity: 'error',
+      summary: status >= 500 ? 'Network diagnostic failed.' : error.message,
+    },
   });
+}
+
+const operationLimiter = createOperationLimiter({
+  globalLimit: 4,
+  perToolLimit: {
+    ping: 2,
+    traceroute: 1,
+    dns: 3,
+    whois: 1,
+    portscan: 2,
+    diagnose: 2,
+  },
+});
+
+function operationRoute(tool, handler) {
+  return async (req, res) => {
+    const requestId = createRequestId();
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Request-Id', requestId);
+
+    const release = operationLimiter.acquire(tool);
+    if (!release) {
+      res.set('Retry-After', '2');
+      return res.status(429).json({
+        schema_version: 2,
+        request_id: requestId,
+        tool,
+        ok: false,
+        status: 'busy',
+        error: 'This diagnostic is already busy. Try again shortly.',
+        diagnosis: {
+          code: 'TOOL_BUSY',
+          severity: 'warning',
+          summary: 'This diagnostic is already busy. Try again shortly.',
+        },
+      });
+    }
+
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    req.once('aborted', abort);
+    res.once('close', () => {
+      if (!res.writableEnded) abort();
+    });
+
+    try {
+      await handler(req, res, { requestId, signal: controller.signal });
+    } catch (error) {
+      if (!controller.signal.aborted && !res.headersSent) sendRouteError(res, error, requestId, tool);
+    } finally {
+      req.removeListener('aborted', abort);
+      release();
+    }
+  };
+}
+
+function privateNoStore(_req, res, next) {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+}
+
+function requestValue(req, bodyKey, queryKey = bodyKey) {
+  return req.method === 'POST' ? req.body?.[bodyKey] : req.query?.[queryKey];
+}
+
+function parseBooleanValue(value, fieldName = 'value') {
+  if (value == null || value === '' || value === false || value === 0) return false;
+  if (value === true || value === 1) return true;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  throw new ToolInputError('INVALID_BOOLEAN', `${fieldName} must be true or false.`);
+}
+
+function requestBoolean(req, bodyKey, queryKey = bodyKey) {
+  return parseBooleanValue(requestValue(req, bodyKey, queryKey), bodyKey);
+}
+
+async function handlePing(req, res, { requestId, signal }) {
+  const target = normalizeTarget(requestValue(req, 'target', 'host'));
+  const payload = await runPingDiagnostic(target, {
+    requestId,
+    signal,
+    count: requestValue(req, 'count'),
+    replyTimeout: requestValue(req, 'reply_timeout'),
+  });
+  if (!signal.aborted && payload) res.json(payload);
+}
+
+async function handleTrace(req, res, { requestId, signal }) {
+  const target = normalizeTarget(requestValue(req, 'target', 'host'));
+  const payload = await runTraceDiagnostic(target, {
+    requestId,
+    signal,
+    maxHops: requestValue(req, 'max_hops'),
+    mode: requestValue(req, 'mode'),
+  });
+  if (!signal.aborted && payload) res.json(payload);
+}
+
+async function handleDns(req, res, { requestId, signal }) {
+  const target = normalizeTarget(requestValue(req, 'target', 'host'), { allowUnderscore: true });
+  const payload = await runDnsDiagnostic(target, {
+    requestId,
+    signal,
+    recordType: requestValue(req, 'type'),
+  });
+  if (!signal.aborted && payload) res.json(payload);
+}
+
+async function handlePortScan(req, res, { requestId, signal }) {
+  const target = normalizeTarget(requestValue(req, 'target', 'host'));
+  const payload = await runPortScanDiagnostic(target, {
+    requestId,
+    signal,
+    ports: requestValue(req, 'ports'),
+    timeoutMs: requestValue(req, 'timeout_ms'),
+  });
+  if (!signal.aborted && payload) res.json(payload);
+}
+
+async function handleDiagnosis(req, res, { requestId, signal }) {
+  const target = normalizeTarget(requestValue(req, 'target', 'host'));
+  const payload = await runNetworkDiagnosis(target, {
+    requestId,
+    signal,
+    includeTrace: requestBoolean(req, 'include_trace'),
+    maxHops: requestValue(req, 'max_hops'),
+    traceMode: requestValue(req, 'trace_mode'),
+  });
+  if (!signal.aborted && payload) res.json(payload);
 }
 
 function setupNetworkToolRoutes(app, requireAuth) {
   // Ping
-  app.get('/api/tools/ping', requireAuth, async (req, res) => {
-    const host = sanitize(req.query.host);
-    if (!host) return res.status(400).json({ error: 'Host required' });
-    const count = String(Math.min(parseInt(req.query.count, 10) || 4, 10));
-    const output = await runCmd('ping', ['-c', count, '-W', '3', host]);
-    res.json({ host, output });
-  });
+  app.get('/api/tools/ping', privateNoStore, requireAuth, operationRoute('ping', handlePing));
+  app.post('/api/tools/v2/ping', privateNoStore, requireAuth, operationRoute('ping', handlePing));
 
-  // Traceroute. Prefer traceroute when installed; fall back to tracepath on lean VPS images.
-  app.get('/api/tools/traceroute', requireAuth, async (req, res) => {
-    const host = sanitize(req.query.host);
-    if (!host) return res.status(400).json({ error: 'Host required' });
-
-    const tracer = findExecutable(['traceroute', 'tracepath']);
-    if (!tracer) {
-      return res.status(500).json({ host, output: 'No traceroute-compatible command found (traceroute/tracepath missing).' });
-    }
-
-    const tool = path.basename(tracer);
-    const args = tool === 'traceroute'
-      ? ['-m', '20', '-w', '3', host]
-      : ['-m', '20', host];
-    const output = await runCmd(tracer, args, 60000);
-    res.json({ host, tool, output });
-  });
+  // Traceroute
+  app.get('/api/tools/traceroute', privateNoStore, requireAuth, operationRoute('traceroute', handleTrace));
+  app.post('/api/tools/v2/trace', privateNoStore, requireAuth, operationRoute('traceroute', handleTrace));
 
   // DNS lookup
-  app.get('/api/tools/dns', requireAuth, async (req, res) => {
-    const host = sanitize(req.query.host);
-    if (!host) return res.status(400).json({ error: 'Host required' });
-    const type = sanitizeRecordType(req.query.type);
-    const output = await runCmd('dig', ['+short', host, type]);
-    res.json({ host, type, result: output ? output.split('\n').filter(Boolean) : [] });
-  });
+  app.get('/api/tools/dns', privateNoStore, requireAuth, operationRoute('dns', handleDns));
+  app.post('/api/tools/v2/dns', privateNoStore, requireAuth, operationRoute('dns', handleDns));
 
   // Whois
-  app.get('/api/tools/whois', requireAuth, async (req, res) => {
-    const domain = sanitize(req.query.domain);
-    if (!domain) return res.status(400).json({ error: 'Domain required' });
+  app.get('/api/tools/whois', privateNoStore, requireAuth, operationRoute('whois', async (req, res, { requestId, signal }) => {
+    let target;
+    try { target = normalizeTarget(req.query.domain); } catch (error) { return sendRouteError(res, error, requestId, 'whois'); }
+    const domain = target.host;
     const whois = findExecutable(['whois']);
     if (!whois) return res.status(500).json({ domain, output: 'whois command not installed.' });
-    const output = await runCmd(whois, [domain], 15000);
+    const result = await runCommand(whois, [domain], { timeoutMs: 15000, signal });
+    if (signal.aborted) return;
+    const output = commandOutput(result);
     res.json({ domain, output });
-  });
+  }));
 
   // Port scan (basic common ports)
-  app.get('/api/tools/portscan', requireAuth, async (req, res) => {
-    const host = sanitize(req.query.host);
-    if (!host) return res.status(400).json({ error: 'Host required' });
-    const ports = [22, 80, 443, 3000, 3306, 5432, 8080, 8443];
-    const results = await Promise.all(ports.map(port => checkPort(host, port)));
-    res.json({ host, ports: results });
-  });
+  app.get('/api/tools/portscan', privateNoStore, requireAuth, operationRoute('portscan', handlePortScan));
+  app.post('/api/tools/v2/port-scan', privateNoStore, requireAuth, operationRoute('portscan', handlePortScan));
+
+  // Unified diagnosis
+  app.post('/api/tools/v2/diagnose', privateNoStore, requireAuth, operationRoute('diagnose', handleDiagnosis));
 }
 
-module.exports = { setupNetworkToolRoutes };
+module.exports = { parseBooleanValue, setupNetworkToolRoutes };

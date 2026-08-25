@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const path = require('path');
 const helmet = require('helmet');
@@ -120,6 +121,11 @@ function requireAuth(req, res, next) {
   res.status(401).json({ error: 'Invalid credentials' });
 }
 
+function privateNoStore(_req, res, next) {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+}
+
 // --- Collectors ---
 const cpuCollector = require('./collectors/cpu');
 const memoryCollector = require('./collectors/memory');
@@ -137,6 +143,18 @@ const { setupDockerRoutes } = require('./docker');
 const { setupFileManagerRoutes } = require('./filemanager');
 const { initUptimeTables, startChecker, setupUptimeRoutes } = require('./uptime');
 const { initTimeline, record, setupTimelineRoutes, ICONS } = require('./modules/timeline');
+const {
+  buildProcessDiff,
+  buildThresholdPolicy,
+  evaluateMissionState,
+  stabilizeMissionState,
+  buildMissionControlSnapshot,
+} = require('./modules/mission-control');
+const {
+  RANGE_SECONDS: CHART_RANGE_SECONDS,
+  buildChartHistory,
+  validateChartHistoryQuery,
+} = require('./modules/chart-history');
 
 // --- Additional modules ---
 const { setupLogRoutes } = require('./modules/logs');
@@ -155,9 +173,57 @@ let lastMetrics = {};
 let lastProcesses = [];
 let lastServices = {};
 let lastDisk = {};
+let lastProcessDiff = buildProcessDiff([], [], Date.now());
+const missionBootId = crypto.randomUUID();
+const missionSources = { metrics: 0, processes: 0, services: 0, disk: 0 };
+const collectionInFlight = { metrics: false, processes: false, services: false };
+const recentServiceActions = new Map();
+let missionThresholds = buildThresholdPolicy(stmts.getAlertConfig.all());
+const missionRuntime = {
+  level: null,
+  since: Date.now(),
+  revision: 0,
+  payload: null,
+  stableState: null,
+  presentedState: null,
+  candidateLevel: null,
+  candidateSince: 0,
+};
+
+function publishMissionState(now = Date.now(), broadcast = true) {
+  const candidate = evaluateMissionState({
+    metrics: lastMetrics,
+    services: lastServices,
+    disk: lastDisk,
+    processDiff: lastProcessDiff,
+    sourceTimestamps: missionSources,
+    thresholds: missionThresholds,
+    now,
+  });
+  const state = stabilizeMissionState(missionRuntime, candidate, now);
+  missionRuntime.presentedState = state;
+
+  missionRuntime.revision += 1;
+  missionRuntime.payload = {
+    schema_version: 1,
+    boot_id: missionBootId,
+    revision: missionRuntime.revision,
+    generated_at: now,
+    incident_since: missionRuntime.since,
+    ...state,
+  };
+
+  if (broadcast) io.emit('mission-state', missionRuntime.payload);
+  return missionRuntime.payload;
+}
+
+// Give new socket clients a deterministic state even before collectors finish.
+publishMissionState(Date.now(), false);
 
 // --- Metrics collection loop ---
 async function collectMetrics() {
+  if (collectionInFlight.metrics) return;
+  collectionInFlight.metrics = true;
   try {
     const [cpu, mem, net] = await Promise.all([
       cpuCollector(),
@@ -182,39 +248,90 @@ async function collectMetrics() {
     };
 
     lastMetrics = metrics;
+    missionSources.metrics = metrics.ts;
     app.locals.lastMetrics = metrics;
     io.emit('metrics', metrics);
+    publishMissionState();
 
     // Check alerts
     alertEngine.check(metrics);
   } catch (err) {
     console.error('Metrics collection error:', err.message);
+  } finally {
+    collectionInFlight.metrics = false;
   }
 }
 
 // --- Processes collection loop ---
 async function collectProcesses() {
+  if (collectionInFlight.processes) return;
+  collectionInFlight.processes = true;
+  const sampledAt = Date.now();
   try {
-    lastProcesses = await processesCollector();
+    const processes = await processesCollector();
+    if (!Array.isArray(processes) || processes.length === 0) {
+      throw new Error('empty process sample');
+    }
+    lastProcessDiff = buildProcessDiff(lastProcesses, processes, sampledAt);
+    lastProcesses = processes;
+    missionSources.processes = lastProcessDiff.observed_at;
     app.locals.lastProcesses = lastProcesses;
+    app.locals.lastProcessDiff = lastProcessDiff;
     io.emit('processes', lastProcesses);
+    io.emit('process-diff', lastProcessDiff);
+    publishMissionState();
   } catch (err) {
     console.error('Processes collection error:', err.message);
+  } finally {
+    collectionInFlight.processes = false;
   }
 }
 
 // --- Services collection loop ---
 async function collectServices() {
+  if (collectionInFlight.services) return;
+  collectionInFlight.services = true;
   try {
+    const servicesSampledAt = Date.now();
     const services = await servicesCollector(config.services);
+    const diskSampledAt = Date.now();
     const disk = await diskCollector();
+    const previousServices = lastServices;
     lastServices = services;
     lastDisk = disk;
+    missionSources.services = servicesSampledAt;
+    missionSources.disk = diskSampledAt;
     app.locals.lastServices = services;
     app.locals.lastDisk = disk;
     io.emit('services', { services, disk, uptime: process.uptime() });
+    for (const [name, current] of Object.entries(services)) {
+      if (name === '_extra' || typeof current?.active !== 'boolean') continue;
+      const previous = previousServices?.[name];
+      if (typeof previous?.active !== 'boolean' || previous.active === current.active) continue;
+      const recovered = current.active;
+      const recentAction = recentServiceActions.get(name);
+      const correlated = recentAction && Date.now() - recentAction.at <= 120000 ? recentAction : null;
+      record(
+        recovered ? 'service_recovered' : 'service_inactive',
+        'service',
+        recovered ? `${name} restored` : `${name} became inactive`,
+        recovered ? 'Service returned to active state.' : `Service status: ${current.status || 'inactive'}`,
+        'service-collector',
+        {
+          service: name,
+          active: current.active,
+          previous_active: previous.active,
+          correlation_id: correlated?.id,
+          relation: correlated ? 'after_operator_action' : 'observed_transition',
+        }
+      );
+      if (recovered && correlated) recentServiceActions.delete(name);
+    }
+    publishMissionState();
   } catch (err) {
     console.error('Services collection error:', err.message);
+  } finally {
+    collectionInFlight.services = false;
   }
 }
 
@@ -258,16 +375,76 @@ io.on('connection', (socket) => {
   if (lastMetrics.ts) socket.emit('metrics', lastMetrics);
   if (lastProcesses.length) socket.emit('processes', lastProcesses);
   if (lastServices.ssh !== undefined) socket.emit('services', { services: lastServices, disk: lastDisk });
+  socket.emit('process-diff', lastProcessDiff);
+  socket.emit('mission-state', missionRuntime.payload);
 });
 
 // --- REST API: History (now requires auth) ---
 app.get('/api/history', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
   const range = req.query.range || '1h';
   const now = Math.floor(Date.now() / 1000);
   const ranges = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
   const since = now - (ranges[range] || 3600);
   const rows = stmts.getHistory.all(since);
   res.json(rows);
+});
+
+// --- REST API: Charts v2 (bounded, spike-preserving history) ---
+app.get('/api/charts/history', privateNoStore, requireAuth, (req, res) => {
+  const validation = validateChartHistoryQuery(req.query);
+  if (!validation.ok) return res.status(validation.status).json(validation.body);
+
+  const { range, maxPoints } = validation.value;
+  const now = Math.floor(Date.now() / 1000);
+  const since = now - CHART_RANGE_SECONDS[range];
+
+  try {
+    const rows = stmts.getChartHistory.all(since, now);
+    const incidents = stmts.getChartIncidents.all(since, now);
+    const alertConfig = stmts.getChartThresholds.all();
+    return res.json(buildChartHistory({ rows, incidents, alertConfig, range, maxPoints, now }));
+  } catch (err) {
+    console.error('Chart history error:', err.message);
+    return res.status(500).json({
+      error: {
+        code: 'CHART_HISTORY_UNAVAILABLE',
+        message: 'Chart history unavailable',
+      },
+    });
+  }
+});
+
+// --- REST API: Mission Control (read-only operational snapshot) ---
+app.get('/api/mission-control', requireAuth, (_req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+
+  try {
+    const now = Date.now();
+    const nowSeconds = Math.floor(now / 1000);
+    const history = stmts.getHistory.all(nowSeconds - 3600);
+    const timeline = stmts.getTimelineSince.all(nowSeconds - 86400, 50);
+
+    res.json(buildMissionControlSnapshot({
+      metrics: lastMetrics,
+      processes: lastProcesses,
+      services: lastServices,
+      disk: lastDisk,
+      processDiff: lastProcessDiff,
+      history,
+      timeline,
+      now,
+      revision: missionRuntime.revision,
+      incidentSince: missionRuntime.since,
+      sourceTimestamps: missionSources,
+      stateOverride: missionRuntime.presentedState,
+      bootId: missionBootId,
+      thresholds: missionThresholds,
+    }));
+  } catch (err) {
+    console.error('Mission Control snapshot error:', err.message);
+    res.status(500).json({ error: 'Mission Control snapshot unavailable' });
+  }
 });
 
 // --- REST API: Session token for Socket.IO auth ---
@@ -308,8 +485,22 @@ app.post('/api/processes/:pid/kill-force', requireAuth, (req, res) => {
 app.post('/api/services/:name/restart', requireAuth, (req, res) => {
   const { execFile } = require('child_process');
   const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '');
+  const actionId = crypto.randomUUID();
   execFile('systemctl', ['restart', name], { timeout: 30000 }, (err, stdout, stderr) => {
-    if (err) return res.status(400).json({ error: 'Service restart failed' });
+    if (err) {
+      record('service_restart_failed', 'service', `${name} restart failed`, 'The operator restart command did not complete.', 'operator-action', {
+        service: name,
+        correlation_id: actionId,
+        phase: 'context',
+      });
+      return res.status(400).json({ error: 'Service restart failed' });
+    }
+    recentServiceActions.set(name, { id: actionId, at: Date.now() });
+    record('service_restart_completed', 'service', `${name} restart completed`, 'The operator restart command completed successfully.', 'operator-action', {
+      service: name,
+      correlation_id: actionId,
+      phase: 'change',
+    });
     res.json({ ok: true, service: name });
   });
 });
@@ -335,8 +526,19 @@ app.get('/api/alerts/config', requireAuth, (req, res) => {
 app.put('/api/alerts/config/:type', requireAuth, (req, res) => {
   const { type } = req.params;
   const { enabled, threshold, cooldown } = req.body;
-  stmts.updateAlertConfig.run(enabled ? 1 : 0, threshold, cooldown, type);
+  const thresholdValue = Number(threshold);
+  const cooldownValue = Number(cooldown);
+  if (!['cpu', 'ram', 'disk', 'swap'].includes(type)) {
+    return res.status(400).json({ error: 'Invalid alert type' });
+  }
+  if (typeof enabled !== 'boolean' || !Number.isFinite(thresholdValue) || thresholdValue < 1 || thresholdValue > 100 ||
+      !Number.isInteger(cooldownValue) || cooldownValue < 1 || cooldownValue > 86400) {
+    return res.status(400).json({ error: 'Invalid alert configuration' });
+  }
+  stmts.updateAlertConfig.run(enabled ? 1 : 0, thresholdValue, cooldownValue, type);
   alertEngine.reloadConfig();
+  missionThresholds = buildThresholdPolicy(stmts.getAlertConfig.all());
+  res.json({ ok: true });
 });
 
 app.get('/api/alerts/suppression', requireAuth, (_req, res) => {
@@ -344,8 +546,8 @@ app.get('/api/alerts/suppression', requireAuth, (_req, res) => {
 });
 
 // --- Alert engine callback ---
-alertEngine.init(stmts, io);
 initTimeline(stmts, io);
+alertEngine.init(stmts, io, record);
 
 // --- REST API: Predictive Forecasting ---
 app.get('/api/forecast', requireAuth, (_req, res) => {
@@ -463,13 +665,6 @@ stmts.insertAlert = new Proxy(origAlertInsert, {
 initAuditTables(db);
 initAudit(stmts);
 
-// Hook suppressed alerts into timeline
-io.on('connection', (socket) => {
-  socket.on('alert-suppressed', (data) => {
-    record(`suppressed_${data.type}`, 'alert', `${data.type.toUpperCase()} alert suppressed`, `${data.reason} — ${data.value}% (threshold: ${data.threshold}%)`, 'alert-engine', data);
-  });
-});
-
 // --- Terminal ---
 setupTerminal(io);
 
@@ -484,16 +679,7 @@ setupUptimeRoutes(app, requireAuth, stmts);
 
 // --- Incident Timeline ---
 setupTimelineRoutes(app, requireAuth);
-startChecker(stmts, io);
-
-// Hook uptime failures into timeline
-io.on('connection', (socket) => {
-  socket.on('uptime-check', (data) => {
-    if (data.status === 0 || data.status >= 500) {
-      record('uptime_down', 'uptime', `Target ${data.target_id} DOWN`, `HTTP ${data.status}: ${data.error || 'unreachable'}`, 'uptime-checker', { target_id: data.target_id, status: data.status });
-    }
-  });
-});
+startChecker(stmts, io, record);
 
 // --- Additional modules ---
 setupLogRoutes(app, requireAuth);

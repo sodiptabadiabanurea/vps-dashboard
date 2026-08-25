@@ -4,6 +4,7 @@ const telegram = require('./telegram');
 
 let stmts = null;
 let io = null;
+let timelineRecord = null;
 let alertConfigs = {};
 let lastAlertTime = {};
 let suppressedCount = {};    // type -> {count, first_seen, last_seen, reason}
@@ -14,9 +15,10 @@ const PATTERN_WINDOW = 300;  // ±5 min — considered "same time" for pattern
 const PATTERN_MIN_DAYS = 2;  // need 2+ occurrences to establish a pattern
 const DIGEST_INTERVAL = 3600; // hourly digest of suppressed alerts
 
-function init(dbStmts, socketIo) {
+function init(dbStmts, socketIo, recordEvent) {
   stmts = dbStmts;
   io = socketIo;
+  timelineRecord = typeof recordEvent === 'function' ? recordEvent : null;
   reloadConfig();
   startDigestTimer();
 }
@@ -116,6 +118,7 @@ function emitAndStore(type, message, value, threshold, ts, extraMeta) {
 
 // --- Suppression tracking ---
 function suppressAlert(type, label, value, threshold, reason) {
+  const startsWindow = !suppressedCount[type] || suppressedCount[type].count === 0;
   if (!suppressedCount[type]) {
     suppressedCount[type] = { count: 0, first_seen: Date.now(), last_seen: Date.now(), reason, label, threshold };
   }
@@ -125,6 +128,16 @@ function suppressAlert(type, label, value, threshold, reason) {
   // Emit suppressed event (silent — for timeline only)
   if (io) {
     io.emit('alert-suppressed', { type, value, threshold, reason, ts: Math.floor(Date.now() / 1000) });
+  }
+  if (timelineRecord && startsWindow) {
+    timelineRecord(
+      `suppressed_${type}`,
+      'alert',
+      `${type.toUpperCase()} alert suppressed`,
+      `${reason} - ${value}% (threshold: ${threshold}%)`,
+      'alert-engine',
+      { type, value, threshold, reason }
+    );
   }
 }
 
@@ -140,6 +153,14 @@ function sendDigest() {
       if (io) {
         io.emit('alert', { type: 'digest', message: msg, ts: Math.floor(now / 1000) });
       }
+      timelineRecord?.(
+        `suppression_digest_${type}`,
+        'alert',
+        `${info.label} suppression summary`,
+        `${info.count} alerts suppressed over ${duration} minutes`,
+        'alert-engine',
+        { type, count: info.count, duration_min: duration, reason: info.reason, threshold: info.threshold }
+      );
     }
     suppressedCount[type] = { count: 0, first_seen: now, last_seen: now, reason: info.reason, label: info.label, threshold: info.threshold };
   }

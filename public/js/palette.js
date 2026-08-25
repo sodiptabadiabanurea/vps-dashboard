@@ -2,9 +2,11 @@
 (function() {
   const COMMANDS = [
     // Navigation
-    { id: 'nav-cpu', label: 'CPU Chart', keywords: ['cpu', 'chart', 'processor'], icon: '📊', action: () => nav('charts') && selectMetric('cpu') },
-    { id: 'nav-ram', label: 'RAM Chart', keywords: ['ram', 'memory', 'chart'], icon: '📊', action: () => nav('charts') && selectMetric('ram') },
-    { id: 'nav-network', label: 'Network Chart', keywords: ['network', 'net', 'traffic', 'chart'], icon: '📊', action: () => nav('charts') && selectMetric('network') },
+    { id: 'nav-cpu', label: 'CPU Chart', keywords: ['cpu', 'chart', 'processor'], icon: '📊', action: () => openChart('cpu') },
+    { id: 'nav-ram', label: 'RAM Chart', keywords: ['ram', 'memory', 'chart'], icon: '📊', action: () => openChart('ram') },
+    { id: 'nav-disk-chart', label: 'Disk Chart', keywords: ['disk', 'storage', 'chart'], icon: '📊', action: () => openChart('disk') },
+    { id: 'nav-swap-chart', label: 'Swap Chart', keywords: ['swap', 'memory', 'chart'], icon: '📊', action: () => openChart('swap') },
+    { id: 'nav-network', label: 'Network Chart', keywords: ['network', 'net', 'traffic', 'chart'], icon: '📊', action: () => openChart('network') },
     { id: 'nav-dashboard', label: 'Dashboard', keywords: ['dashboard', 'home', 'main'], icon: '🏠', action: () => nav('dashboard') },
     { id: 'nav-processes', label: 'Process Manager', keywords: ['processes', 'process', 'proc', 'ps'], icon: '📋', action: () => nav('processes') },
     { id: 'nav-alerts', label: 'Alert Configuration', keywords: ['alerts', 'alert', 'notification', 'threshold'], icon: '🔔', action: () => nav('alerts') },
@@ -35,11 +37,10 @@
     if (btn) btn.click();
     return true;
   }
-  function selectMetric(metric) {
-    setTimeout(() => {
-      const tab = document.querySelector(`.chart-tab[data-metric="${metric}"]`);
-      if (tab) tab.click();
-    }, 100);
+  function openChart(metric) {
+    // Prepare state before navigation so the Charts page issues one request.
+    window.prepareCharts?.({ metric });
+    nav('charts');
   }
   async function restartService(name) {
     try {

@@ -1,17 +1,23 @@
 // Dashboard gauges and real-time updates
 (function() {
   const CIRCUMFERENCE = 2 * Math.PI * 52; // gauge circle radius = 52
+  let gaugeThresholds = window.missionControlSnapshot?.thresholds || {};
 
-  function setGauge(id, percent, colorVar) {
+  function setGauge(id, percent) {
     const el = document.getElementById(id);
     if (!el) return;
     const offset = CIRCUMFERENCE - (percent / 100) * CIRCUMFERENCE;
     el.style.strokeDashoffset = offset;
-    // Color based on value
-    if (percent > 90) el.style.stroke = 'var(--red)';
-    else if (percent > 70) el.style.stroke = 'var(--yellow)';
+    const metric = id.replace(/Gauge$/, '').toLowerCase();
+    const policy = gaugeThresholds[metric] || { attention: 70, incident: 90 };
+    if (percent >= Number(policy.incident)) el.style.stroke = 'var(--red)';
+    else if (percent >= Number(policy.attention)) el.style.stroke = 'var(--yellow)';
     else el.style.stroke = 'var(--accent)';
   }
+
+  document.addEventListener('vps:missionupdate', event => {
+    if (event.detail?.thresholds) gaugeThresholds = event.detail.thresholds;
+  });
 
   function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
@@ -24,6 +30,20 @@
     if (bytesPerSec < 1024) return bytesPerSec + ' B/s';
     if (bytesPerSec < 1024 * 1024) return (bytesPerSec / 1024).toFixed(1) + ' KB/s';
     return (bytesPerSec / (1024 * 1024)).toFixed(1) + ' MB/s';
+  }
+
+  function createTextElement(tag, className, value) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    element.textContent = String(value == null ? '' : value);
+    return element;
+  }
+
+  function appendStatRow(container, label, value, valueClass = 'stat-value') {
+    const row = document.createElement('div');
+    row.className = 'stat-row';
+    row.append(createTextElement('span', 'stat-label', label), createTextElement('span', valueClass, value));
+    container.append(row);
   }
 
   // Listen for metrics
@@ -63,80 +83,118 @@
 
       // Disk table
       const diskTable = document.getElementById('diskTable');
-      diskTable.innerHTML = disk.filesystems.map(f => `
-        <tr>
-          <td>${f.mount}</td>
-          <td class="val">${formatBytes(f.size)}</td>
-          <td class="val">${formatBytes(f.used)}</td>
-          <td class="val">${formatBytes(f.avail)}</td>
-          <td class="val" style="color:${f.percent > 90 ? 'var(--red)' : f.percent > 70 ? 'var(--yellow)' : 'var(--accent)'}">${f.percent}%</td>
-        </tr>
-      `).join('');
+      if (diskTable) {
+        const rows = disk.filesystems.map(filesystem => {
+          const row = document.createElement('tr');
+          row.append(
+            createTextElement('td', '', filesystem.mount),
+            createTextElement('td', 'val', formatBytes(filesystem.size)),
+            createTextElement('td', 'val', formatBytes(filesystem.used)),
+            createTextElement('td', 'val', formatBytes(filesystem.avail))
+          );
+          const percent = createTextElement('td', 'val', `${Number(filesystem.percent) || 0}%`);
+          percent.style.color = filesystem.percent > 90 ? 'var(--red)' : filesystem.percent > 70 ? 'var(--yellow)' : 'var(--accent)';
+          row.append(percent);
+          return row;
+        });
+        diskTable.replaceChildren(...rows);
+      }
 
       // Top dirs
       const dirsTable = document.getElementById('dirsTable');
-      if (disk.topDirs) {
-        dirsTable.innerHTML = disk.topDirs.map(d => `
-          <tr><td style="font-size:12px">${d.path}</td><td class="val">${d.size}</td></tr>
-        `).join('');
+      if (dirsTable && Array.isArray(disk.topDirs)) {
+        const rows = disk.topDirs.map(directory => {
+          const row = document.createElement('tr');
+          const path = createTextElement('td', '', directory.path);
+          path.style.fontSize = '12px';
+          row.append(path, createTextElement('td', 'val', directory.size));
+          return row;
+        });
+        dirsTable.replaceChildren(...rows);
       }
     }
 
     // Services list
     const servicesList = document.getElementById('servicesList');
     const extra = services._extra || {};
-    const serviceHtml = [];
+    const serviceRows = [];
     for (const [key, val] of Object.entries(services)) {
       if (key === '_extra') continue;
-      serviceHtml.push(`
-        <div class="service-row">
-          <span class="service-name">${key}</span>
-          <span class="service-status ${val.active ? 'active' : 'inactive'}">${val.active ? '✅ Active' : '❌ ' + val.status}</span>
-        </div>
-      `);
+      const row = document.createElement('div');
+      row.className = 'service-row';
+      row.append(
+        createTextElement('span', 'service-name', key),
+        createTextElement('span', `service-status ${val.active ? 'active' : 'inactive'}`, val.active ? 'Active' : val.status || 'Inactive')
+      );
+      serviceRows.push(row);
     }
     // SSH info
     if (extra.ssh_connections !== undefined) {
-      serviceHtml.push(`
-        <div class="service-row">
-          <span class="service-name">SSH</span>
-          <span class="stat-value">${extra.ssh_connections} connection(s)</span>
-        </div>
-      `);
+      const row = document.createElement('div');
+      row.className = 'service-row';
+      row.append(
+        createTextElement('span', 'service-name', 'SSH'),
+        createTextElement('span', 'stat-value', `${extra.ssh_connections} connection(s)`)
+      );
+      serviceRows.push(row);
     }
     if (extra.failed_logins !== undefined) {
-      serviceHtml.push(`
-        <div class="stat-row" style="margin-top:4px">
-          <span class="stat-label" style="font-size:11px">Failed attempts today</span>
-          <span style="font-size:11px;color:${extra.failed_logins > 0 ? 'var(--red)' : 'var(--accent)'}">${extra.failed_logins}</span>
-        </div>
-      `);
+      const row = document.createElement('div');
+      row.className = 'stat-row';
+      row.style.marginTop = '4px';
+      const label = createTextElement('span', 'stat-label', 'Failed attempts today');
+      label.style.fontSize = '11px';
+      const value = createTextElement('span', '', extra.failed_logins);
+      value.style.fontSize = '11px';
+      value.style.color = extra.failed_logins > 0 ? 'var(--red)' : 'var(--accent)';
+      row.append(label, value);
+      serviceRows.push(row);
     }
-    servicesList.innerHTML = serviceHtml.join('');
+    servicesList?.replaceChildren(...serviceRows);
 
     // System info
     const sysInfo = document.getElementById('systemInfo');
-    sysInfo.innerHTML = `
-      <div class="stat-row"><span class="stat-label">Kernel</span><span class="stat-value">${extra.kernel || '-'}</span></div>
-      <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-value">${extra.uptime || '-'}</span></div>
-      <div class="stat-row"><span class="stat-label">Load</span><span class="stat-value">${extra.load || '-'}</span></div>
-      <div class="stat-row"><span class="stat-label">Security Updates</span><span class="stat-value" style="color:var(--accent)">${extra.security_updates || 0} available</span></div>
-      <div class="stat-row"><span class="stat-label">Last apt update</span><span class="stat-value" style="font-size:11px">${extra.last_apt_update || '-'}</span></div>
-    `;
+    if (sysInfo) {
+      sysInfo.replaceChildren();
+      appendStatRow(sysInfo, 'Kernel', extra.kernel || '-');
+      appendStatRow(sysInfo, 'Uptime', extra.uptime || '-');
+      appendStatRow(sysInfo, 'Load', extra.load ?? '-');
+      appendStatRow(sysInfo, 'Security Updates', `${extra.security_updates || 0} available`);
+      appendStatRow(sysInfo, 'Last apt update', extra.last_apt_update || '-');
+    }
   });
 
   // Process preview on dashboard
   socket.on('processes', (procs) => {
     const preview = document.getElementById('procPreview');
-    preview.innerHTML = procs.slice(0, 5).map(p => `
-      <tr>
-        <td class="proc-pid">${p.pid}</td>
-        <td><span class="proc-name" title="${p.cmd}">${p.name}</span></td>
-        <td class="proc-cpu">${p.cpu}%</td>
-        <td class="proc-mem">${p.mem}%</td>
-        <td><span class="proc-status ${p.state.toLowerCase().replace(' ', '')}">${p.state}</span></td>
-      </tr>
-    `).join('');
+    if (!preview) return;
+    const rows = (Array.isArray(procs) ? procs : []).slice(0, 5).map(p => {
+      const row = document.createElement('tr');
+      const pid = document.createElement('td');
+      const nameCell = document.createElement('td');
+      const name = document.createElement('span');
+      const cpu = document.createElement('td');
+      const mem = document.createElement('td');
+      const statusCell = document.createElement('td');
+      const status = document.createElement('span');
+
+      pid.className = 'proc-pid';
+      pid.textContent = String(p.pid ?? '—');
+      name.className = 'proc-name';
+      name.title = String(p.cmd || '');
+      name.textContent = String(p.name || 'Unknown');
+      nameCell.append(name);
+      cpu.className = 'proc-cpu';
+      cpu.textContent = `${Number(p.cpu) || 0}%`;
+      mem.className = 'proc-mem';
+      mem.textContent = `${Number(p.mem) || 0}%`;
+      status.className = `proc-status ${String(p.state || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+      status.textContent = String(p.state || 'Unknown');
+      statusCell.append(status);
+      row.append(pid, nameCell, cpu, mem, statusCell);
+      return row;
+    });
+    preview.replaceChildren(...rows);
   });
 
   // Expose formatters
@@ -157,14 +215,18 @@
 
       // Disk
       if (f.disk.days_to_full) {
-        elDisk.innerHTML = `${f.disk.used_pct}% used · <span style="color:var(--yellow)">~${f.disk.days_to_full}d left</span>`;
+        const warning = createTextElement('span', '', `~${f.disk.days_to_full}d left`);
+        warning.style.color = 'var(--yellow)';
+        elDisk.replaceChildren(document.createTextNode(`${f.disk.used_pct}% used · `), warning);
       } else {
         elDisk.textContent = `${f.disk.used_pct}% used · ${f.disk.free_gb}GB free`;
       }
 
       // RAM
       if (f.ram.days_to_exhaustion) {
-        elRam.innerHTML = `${f.ram.used_pct}% · <span style="color:var(--red)">~${f.ram.days_to_exhaustion}d left</span>`;
+        const warning = createTextElement('span', '', `~${f.ram.days_to_exhaustion}d left`);
+        warning.style.color = 'var(--red)';
+        elRam.replaceChildren(document.createTextNode(`${f.ram.used_pct}% · `), warning);
       } else {
         elRam.textContent = `${f.ram.used_pct}% · ${f.ram.trend}`;
       }
@@ -181,12 +243,10 @@
     } catch (_) {}
   }
 
-  // Load on dashboard view
-  const observer = new MutationObserver(() => {
-    const dash = document.getElementById('page-dashboard');
-    if (dash && dash.classList.contains('active')) loadForecast();
+  // Load on the explicit page lifecycle instead of observing all class mutations.
+  document.addEventListener('vps:pagechange', event => {
+    if (event.detail?.page === 'dashboard') loadForecast();
   });
-  observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'] });
   if (document.getElementById('page-dashboard')?.classList.contains('active')) loadForecast();
   setInterval(loadForecast, 600000); // refresh every 10 min
 })();

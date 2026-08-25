@@ -22,9 +22,20 @@ function record(type, category, title, detail, source, metadata) {
   if (!stmts) return;
   const now = Math.floor(Date.now() / 1000);
   try {
-    stmts.insertTimelineEvent.run(now, type, category, title, detail, source, JSON.stringify(metadata || {}));
+    const result = stmts.insertTimelineEvent.run(now, type, category, title, detail, source, JSON.stringify(metadata || {}));
     if (io) {
-      io.emit('timeline-event', { ts: now, type, category, title, detail, source, metadata, icon: ICONS[category] || '📌' });
+      io.emit('timeline-event', {
+        id: Number(result.lastInsertRowid),
+        ts: now,
+        type,
+        category,
+        title,
+        detail,
+        source,
+        metadata,
+        phase: metadata?.phase,
+        icon: ICONS[category] || '📌',
+      });
     }
   } catch (e) {
     // Timeline is best-effort; don't crash on recording failures
