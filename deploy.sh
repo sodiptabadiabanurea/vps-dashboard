@@ -1,4 +1,3 @@
-#!/bin/bash
 # ============================================================
 # VPS Dashboard - Complete Deploy Script for kakibaabu
 # ============================================================
@@ -35,7 +34,6 @@ echo "  Server: ${DOMAIN}"
 echo "============================================================"
 echo ""
 
-# Check if running as root
 if [ "$EUID" -eq 0 ]; then
   warn "Running as root. Will create a non-root user for the app."
   RUNNING_AS_ROOT=true
@@ -112,7 +110,8 @@ success "Dependencies installed"
 # Step 6: Generate credentials
 # ============================================================
 info "Step 6/8: Generating credentials..."
-DASH_PASS=$(openssl rand -base64 12 | tr -d '=/+' | head -c 16)
+# 64 hex characters (256 bits); config.js requires at least 32 characters.
+DASH_PASS=$(openssl rand -hex 32)
 success "Generated dashboard password: ${DASH_PASS}"
 echo ""
 warn "SAVE THIS PASSWORD! You'll need it to login."
@@ -158,7 +157,6 @@ success "systemd service created and started"
 # ============================================================
 info "Step 8/8: Configuring nginx..."
 
-# Check if SSL cert exists
 if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
   info "SSL certificate found, configuring HTTPS..."
   sudo tee /etc/nginx/sites-available/vps-dashboard > /dev/null <<NGINX
@@ -216,35 +214,3 @@ fi
 sudo ln -sf /etc/nginx/sites-available/vps-dashboard /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 success "nginx configured and reloaded"
-
-# ============================================================
-# Done!
-# ============================================================
-echo ""
-echo "============================================================"
-echo -e "  ${GREEN}Deploy Complete!${NC}"
-echo "============================================================"
-echo ""
-echo "  Dashboard: https://${DOMAIN}"
-echo "  Username:  admin"
-echo "  Password:  ${DASH_PASS}"
-echo ""
-echo "  Config:    /etc/systemd/system/vps-dashboard.service"
-echo "  Database:  ${DB_DIR}/dashboard.db"
-echo "  Logs:      journalctl -u vps-dashboard -f"
-echo ""
-echo "  Commands:"
-echo "    sudo systemctl restart vps-dashboard"
-echo "    sudo systemctl status vps-dashboard"
-echo "    journalctl -u vps-dashboard -f"
-echo ""
-echo "  To enable Telegram alerts:"
-echo "    1. Create bot via @BotFather"
-echo "    2. Edit service: sudo nano /etc/systemd/system/vps-dashboard.service"
-echo "    3. Uncomment TELEGRAM_TOKEN and TELEGRAM_CHAT_ID"
-echo "    4. sudo systemctl daemon-reload && sudo systemctl restart vps-dashboard"
-echo ""
-echo "  To get SSL (if not already):"
-echo "    sudo certbot --nginx -d ${DOMAIN}"
-echo ""
-echo "============================================================"
