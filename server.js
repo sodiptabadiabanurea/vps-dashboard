@@ -13,22 +13,57 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Basic Auth middleware ---
+function parseBasicCredentials(header) {
+  if (typeof header !== 'string' || !header.startsWith('Basic ')) return null;
+  try {
+    const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
+    const separator = decoded.indexOf(':');
+    if (separator < 0) return null;
+    return { user: decoded.slice(0, separator), pass: decoded.slice(separator + 1) };
+  } catch {
+    return null;
+  }
+}
+
+function isSocketAuthorized(socket) {
+  const credentials = parseBasicCredentials(socket.handshake.headers.authorization);
+  return Boolean(credentials && credentials.user === config.user && credentials.pass === config.pass);
+}
+
+function isAllowedSocketOrigin(socket) {
+  const origin = socket.handshake.headers.origin;
+  if (!origin) return true;
+  try {
+    const originUrl = new URL(origin);
+    const host = socket.handshake.headers.host;
+    return host && originUrl.host === host;
+  } catch {
+    return false;
+  }
+}
+
 function requireAuth(req, res, next) {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Basic ')) {
+  const credentials = parseBasicCredentials(req.headers.authorization);
+  if (!credentials) {
     logLogin(req.ip, req.get('user-agent'), false);
     res.set('WWW-Authenticate', 'Basic realm="VPS Dashboard"');
     return res.status(401).send('Authentication required');
   }
-  const [user, pass] = Buffer.from(auth.split(' ')[1], 'base64').toString().split(':');
-  if (user === config.user && pass === config.pass) {
+  if (credentials.user === config.user && credentials.pass === config.pass) {
     logLogin(req.ip, req.get('user-agent'), true);
     return next();
   }
   logLogin(req.ip, req.get('user-agent'), false);
   res.set('WWW-Authenticate', 'Basic realm="VPS Dashboard"');
-  res.status(401).send('Invalid credentials');
+  return res.status(401).send('Invalid credentials');
 }
+
+// Socket.IO exposes system telemetry, so apply the same authentication boundary.
+io.use((socket, next) => {
+  if (!isSocketAuthorized(socket)) return next(new Error('Authentication required'));
+  if (!isAllowedSocketOrigin(socket)) return next(new Error('Invalid origin'));
+  next();
+});
 
 // --- Collectors ---
 const cpuCollector = require('./collectors/cpu');
@@ -92,15 +127,12 @@ async function collectMetrics() {
 
     lastMetrics = metrics;
     io.emit('metrics', metrics);
-
-    // Check alerts
     alertEngine.check(metrics);
   } catch (err) {
     console.error('Metrics collection error:', err.message);
   }
 }
 
-// --- Processes collection loop ---
 async function collectProcesses() {
   try {
     lastProcesses = await processesCollector();
@@ -110,7 +142,6 @@ async function collectProcesses() {
   }
 }
 
-// --- Services collection loop ---
 async function collectServices() {
   try {
     const services = await servicesCollector(config.services);
@@ -123,7 +154,6 @@ async function collectServices() {
   }
 }
 
-// --- History write loop ---
 function writeHistory() {
   if (!lastMetrics.ts) return;
   try {
@@ -146,14 +176,13 @@ function writeHistory() {
 
 // --- Socket.IO connection ---
 io.on('connection', (socket) => {
-  // Send current state immediately
   if (lastMetrics.ts) socket.emit('metrics', lastMetrics);
   if (lastProcesses.length) socket.emit('processes', lastProcesses);
   if (lastServices.ssh !== undefined) socket.emit('services', { services: lastServices, disk: lastDisk });
 });
 
 // --- REST API: History ---
-app.get('/api/history', (req, res) => {
+app.get('/api/history', requireAuth, (req, res) => {
   const range = req.query.range || '1h';
   const now = Math.floor(Date.now() / 1000);
   const ranges = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
@@ -191,10 +220,11 @@ app.post('/api/processes/:pid/kill-force', requireAuth, (req, res) => {
 
 // --- REST API: Services ---
 app.post('/api/services/:name/restart', requireAuth, (req, res) => {
-  const { execSync } = require('child_process');
-  const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '');
+  const { execFileSync } = require('child_process');
+  const name = req.params.name;
+  if (!/^[a-zA-Z0-9_.@-]+$/.test(name)) return res.status(400).json({ error: 'Invalid service name' });
   try {
-    execSync(`systemctl restart ${name}`, { timeout: 30000 });
+    execFileSync('systemctl', ['restart', name], { timeout: 30000 });
     res.json({ ok: true, service: name });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -203,7 +233,7 @@ app.post('/api/services/:name/restart', requireAuth, (req, res) => {
 
 // --- REST API: Alerts ---
 app.get('/api/alerts', requireAuth, (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 50;
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
   res.json(stmts.getAlerts.all(limit));
 });
 
@@ -219,25 +249,15 @@ app.put('/api/alerts/config/:type', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// --- Alert engine callback ---
 alertEngine.init(stmts, io);
 initAuditTables(db);
 initAudit(stmts);
 
-// --- Terminal ---
 setupTerminal(io);
-
-// --- Docker ---
 setupDockerRoutes(app, requireAuth);
-
-// --- File Manager ---
 setupFileManagerRoutes(app, requireAuth);
-
-// --- Uptime Monitor ---
 setupUptimeRoutes(app, requireAuth, stmts);
 startChecker(stmts, io);
-
-// --- Additional modules ---
 setupLogRoutes(app, requireAuth);
 setupCronRoutes(app, requireAuth, auditLog);
 setupSSLRoutes(app, requireAuth, config);
@@ -249,7 +269,6 @@ setupTwoFARoutes(app, requireAuth, stmts, auditLog);
 setupNotificationRoutes(app, requireAuth, stmts, auditLog);
 setupHealthRoutes(app, requireAuth, stmts);
 
-// --- Start collection loops ---
 setInterval(collectMetrics, config.metricsInterval);
 setInterval(collectProcesses, config.processesInterval);
 setInterval(collectServices, config.servicesInterval);
@@ -259,7 +278,6 @@ collectMetrics();
 collectProcesses();
 collectServices();
 
-// --- Start server ---
 server.listen(config.port, config.hostname, () => {
   console.log(`VPS Dashboard running at http://${config.hostname}:${config.port}`);
 });
