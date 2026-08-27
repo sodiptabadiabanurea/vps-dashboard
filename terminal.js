@@ -52,7 +52,7 @@ function setupTerminal(io) {
     try {
       const shell = process.env.SHELL || '/bin/bash';
       const pty = require('node-pty');
-      ptyProcess = pty.spawn(shell, ['--noprofile', '--norc'], {
+      ptyProcess = pty.spawn(shell, [], {
         name: 'xterm-256color',
         cols: 80,
         rows: 30,
