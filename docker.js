@@ -1,9 +1,9 @@
 // Docker Monitor - CLI-based (no dockerode dependency needed)
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
-function execCmd(cmd) {
+function execDocker(args, timeout = 10000) {
   return new Promise((resolve, reject) => {
-    exec(cmd, { timeout: 10000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('docker', args, { timeout, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message));
       else resolve(stdout.trim());
     });
@@ -12,7 +12,7 @@ function execCmd(cmd) {
 
 async function isDockerAvailable() {
   try {
-    await execCmd('docker info --format "{{.ServerVersion}}"');
+    await execDocker(['info', '--format', '{{.ServerVersion}}']);
     return true;
   } catch { return false; }
 }
@@ -20,7 +20,7 @@ async function isDockerAvailable() {
 async function listContainers() {
   try {
     const format = '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.State}}\t{{.Ports}}\t{{.Size}}';
-    const raw = await execCmd(`docker ps -a --format "${format}" --no-trunc`);
+    const raw = await execDocker(['ps', '-a', '--format', format, '--no-trunc']);
     if (!raw) return [];
     return raw.split('\n').map(line => {
       const [id, name, image, status, state, ports, size] = line.split('\t');
@@ -32,7 +32,7 @@ async function listContainers() {
 async function getContainerStats() {
   try {
     const format = '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}';
-    const raw = await execCmd(`docker stats --no-stream --format "${format}"`);
+    const raw = await execDocker(['stats', '--no-stream', '--format', format]);
     if (!raw) return [];
     return raw.split('\n').map(line => {
       const [name, cpu, memUsage, memPerc, netIO, blockIO, pids] = line.split('\t');
@@ -41,51 +41,49 @@ async function getContainerStats() {
   } catch { return []; }
 }
 
+function validateContainerName(name) {
+  if (typeof name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(name)) {
+    throw new Error('Invalid container name');
+  }
+  return name;
+}
+
 async function getContainerLogs(name, lines = 100) {
   try {
-    return await execCmd(`docker logs --tail ${lines} --timestamps "${name}" 2>&1`);
+    const safeName = validateContainerName(name);
+    const safeLines = Math.min(Math.max(Number.parseInt(lines, 10) || 100, 1), 5000);
+    return await execDocker(['logs', '--tail', String(safeLines), '--timestamps', safeName]);
   } catch (err) { return `Error: ${err.message}`; }
 }
 
 async function containerAction(name, action) {
   const allowed = ['start', 'stop', 'restart', 'pause', 'unpause'];
   if (!allowed.includes(action)) throw new Error('Invalid action');
-  const safeName = name.replace(/[^a-zA-Z0-9_.-]/g, '');
-  return execCmd(`docker ${action} "${safeName}"`);
+  const safeName = validateContainerName(name);
+  return execDocker([action, safeName]);
 }
 
 function setupDockerRoutes(app, requireAuth) {
-  // Check docker availability
   app.get('/api/docker/available', requireAuth, async (req, res) => {
     res.json({ available: await isDockerAvailable() });
   });
 
-  // List containers
   app.get('/api/docker/containers', requireAuth, async (req, res) => {
-    try {
-      const containers = await listContainers();
-      res.json(containers);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json(await listContainers());
   });
 
-  // Container stats
   app.get('/api/docker/stats', requireAuth, async (req, res) => {
-    try {
-      const stats = await getContainerStats();
-      res.json(stats);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json(await getContainerStats());
   });
 
-  // Container logs
   app.get('/api/docker/logs/:name', requireAuth, async (req, res) => {
     try {
-      const lines = parseInt(req.query.lines, 10) || 100;
+      const lines = Number.parseInt(req.query.lines, 10) || 100;
       const logs = await getContainerLogs(req.params.name, lines);
       res.json({ logs });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) { res.status(400).json({ error: err.message }); }
   });
 
-  // Container action
   app.post('/api/docker/:name/:action', requireAuth, async (req, res) => {
     try {
       await containerAction(req.params.name, req.params.action);
@@ -94,4 +92,4 @@ function setupDockerRoutes(app, requireAuth) {
   });
 }
 
-module.exports = { setupDockerRoutes, isDockerAvailable, listContainers, getContainerStats };
+module.exports = { setupDockerRoutes, isDockerAvailable, listContainers, getContainerStats, getContainerLogs, containerAction, validateContainerName };
