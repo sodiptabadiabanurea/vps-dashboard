@@ -15,18 +15,12 @@ success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-# ============================================================
-# Configuration
-# ============================================================
 APP_DIR="/opt/vps-dashboard"
 DB_DIR="/var/lib/vps-dashboard"
 DOMAIN="kakibaabu.duckdns.org"
 PORT=3000
 NODE_VERSION="20"
 
-# ============================================================
-# Pre-flight checks
-# ============================================================
 echo ""
 echo "============================================================"
 echo "  VPS Dashboard - Deploy Script"
@@ -41,9 +35,6 @@ else
   RUNNING_AS_ROOT=false
 fi
 
-# ============================================================
-# Step 1: Install Node.js
-# ============================================================
 info "Step 1/8: Checking Node.js..."
 if command -v node &> /dev/null; then
   NODE_VER=$(node -v)
@@ -55,9 +46,6 @@ else
   success "Node.js installed: $(node -v)"
 fi
 
-# ============================================================
-# Step 2: Install nginx
-# ============================================================
 info "Step 2/8: Checking nginx..."
 if command -v nginx &> /dev/null; then
   success "nginx already installed"
@@ -69,9 +57,6 @@ else
   success "nginx installed and started"
 fi
 
-# ============================================================
-# Step 3: Create directories
-# ============================================================
 info "Step 3/8: Creating directories..."
 sudo mkdir -p "$APP_DIR"
 sudo mkdir -p "$DB_DIR"
@@ -84,9 +69,6 @@ else
 fi
 success "Directories created"
 
-# ============================================================
-# Step 4: Copy application files
-# ============================================================
 info "Step 4/8: Copying application files..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 sudo cp -r "$SCRIPT_DIR"/* "$APP_DIR/"
@@ -98,17 +80,11 @@ else
 fi
 success "Files copied to $APP_DIR"
 
-# ============================================================
-# Step 5: Install npm dependencies
-# ============================================================
 info "Step 5/8: Installing npm dependencies..."
 cd "$APP_DIR"
 sudo npm install --production 2>&1 | tail -3
 success "Dependencies installed"
 
-# ============================================================
-# Step 6: Generate credentials
-# ============================================================
 info "Step 6/8: Generating credentials..."
 # 64 hex characters (256 bits); config.js requires at least 32 characters.
 DASH_PASS=$(openssl rand -hex 32)
@@ -117,9 +93,6 @@ echo ""
 warn "SAVE THIS PASSWORD! You'll need it to login."
 echo ""
 
-# ============================================================
-# Step 7: Create systemd service
-# ============================================================
 info "Step 7/8: Creating systemd service..."
 sudo tee /etc/systemd/system/vps-dashboard.service > /dev/null <<EOF
 [Unit]
@@ -152,9 +125,6 @@ sudo systemctl enable vps-dashboard
 sudo systemctl start vps-dashboard
 success "systemd service created and started"
 
-# ============================================================
-# Step 8: Configure nginx
-# ============================================================
 info "Step 8/8: Configuring nginx..."
 
 if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
@@ -214,3 +184,35 @@ fi
 sudo ln -sf /etc/nginx/sites-available/vps-dashboard /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 success "nginx configured and reloaded"
+
+# ============================================================
+# Done!
+# ============================================================
+echo ""
+echo "============================================================"
+echo -e "  ${GREEN}Deploy Complete!${NC}"
+echo "============================================================"
+echo ""
+echo "  Dashboard: https://${DOMAIN}"
+echo "  Username:  admin"
+echo "  Password:  ${DASH_PASS}"
+echo ""
+echo "  Config:    /etc/systemd/system/vps-dashboard.service"
+echo "  Database:  ${DB_DIR}/dashboard.db"
+echo "  Logs:      journalctl -u vps-dashboard -f"
+echo ""
+echo "  Commands:"
+echo "    sudo systemctl restart vps-dashboard"
+echo "    sudo systemctl status vps-dashboard"
+echo "    journalctl -u vps-dashboard -f"
+echo ""
+echo "  To enable Telegram alerts:"
+echo "    1. Create bot via @BotFather"
+echo "    2. Edit service: sudo nano /etc/systemd/system/vps-dashboard.service"
+echo "    3. Uncomment TELEGRAM_TOKEN and TELEGRAM_CHAT_ID"
+echo "    4. sudo systemctl daemon-reload && sudo systemctl restart vps-dashboard"
+echo ""
+echo "  To get SSL (if not already):"
+echo "    sudo certbot --nginx -d ${DOMAIN}"
+echo ""
+echo "============================================================"
