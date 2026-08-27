@@ -22,7 +22,6 @@ function safePath(requestedPath) {
     return canonical;
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
-    // For new files, canonicalize and validate the nearest existing parent.
     let parent = path.dirname(lexical);
     while (!fs.existsSync(parent)) {
       const next = path.dirname(parent);
@@ -33,6 +32,22 @@ function safePath(requestedPath) {
     if (!isWithinRoot(canonicalParent)) throw new Error('Access denied');
     return path.join(canonicalParent, path.basename(lexical));
   }
+}
+
+function safePathNoSymlink(requestedPath) {
+  const value = typeof requestedPath === 'string' ? requestedPath : '';
+  const lexical = path.resolve(ROOT, value);
+  if (!isWithinRoot(lexical)) throw new Error('Access denied');
+  const relative = path.relative(ROOT, lexical);
+  const parts = relative ? relative.split(path.sep) : [];
+  let current = ROOT;
+  for (const part of parts) {
+    current = path.join(current, part);
+    if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) {
+      throw new Error('Symlinks are not allowed');
+    }
+  }
+  return lexical;
 }
 
 function safeUploadName(name) {
@@ -95,7 +110,7 @@ function setupFileManagerRoutes(app, requireAuth) {
 
   app.post('/api/files/delete', requireAuth, (req, res) => {
     try {
-      const filePath = safePath(req.body.path);
+      const filePath = safePathNoSymlink(req.body.path);
       if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
       const stats = fs.lstatSync(filePath);
       if (stats.isSymbolicLink()) return res.status(400).json({ error: 'Symlinks cannot be deleted through the file manager' });
@@ -144,4 +159,4 @@ function setupFileManagerRoutes(app, requireAuth) {
   });
 }
 
-module.exports = { setupFileManagerRoutes, safePath, safeUploadName, isWithinRoot };
+module.exports = { setupFileManagerRoutes, safePath, safePathNoSymlink, safeUploadName, isWithinRoot };
