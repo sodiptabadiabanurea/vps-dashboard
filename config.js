@@ -1,10 +1,22 @@
+const required = (name, fallback = '') => {
+  const value = process.env[name];
+  return value === undefined ? fallback : value;
+};
+
+const user = required('DASHBOARD_USER');
+const pass = required('DASHBOARD_PASS');
+
+if (!user || !pass || pass === 'changeme' || pass.length < 32) {
+  throw new Error('DASHBOARD_USER and a DASHBOARD_PASS of at least 32 characters must be configured');
+}
+
 module.exports = {
   port: parseInt(process.env.PORT, 10) || 3000,
   hostname: process.env.HOST || '127.0.0.1',
 
-  // Auth
-  user: process.env.DASHBOARD_USER || 'admin',
-  pass: process.env.DASHBOARD_PASS || 'changeme',
+  // Auth: fail closed; never ship a known/default credential.
+  user,
+  pass,
 
   // Collection intervals (ms)
   metricsInterval: 2000,
