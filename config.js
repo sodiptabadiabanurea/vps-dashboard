@@ -6,15 +6,15 @@ const required = (name, fallback = '') => {
 const user = required('DASHBOARD_USER');
 const pass = required('DASHBOARD_PASS');
 
-if (!user || !pass || pass === 'changeme') {
-  throw new Error('DASHBOARD_USER and a strong DASHBOARD_PASS must be configured');
+if (!user || !pass || pass === 'changeme' || pass.length < 32) {
+  throw new Error('DASHBOARD_USER and a DASHBOARD_PASS of at least 32 characters must be configured');
 }
 
 module.exports = {
   port: parseInt(process.env.PORT, 10) || 3000,
   hostname: process.env.HOST || '127.0.0.1',
 
-  // Auth: fail closed; never ship a known default credential.
+  // Auth: fail closed; never ship a known/default credential.
   user,
   pass,
 
