@@ -180,12 +180,14 @@
               <div class="net-value" id="netTx">0 KB/s</div>
             </div>
           </div>
-          <table class="data-table">
+          <div class="data-table-wrap">
+            <table class="data-table">
             <thead><tr><th>Period</th><th class="val">RX</th><th class="val">TX</th><th class="val">Total</th></tr></thead>
             <tbody id="netTable">
               <tr><td>Today</td><td class="val">-</td><td class="val">-</td><td class="val">-</td></tr>
             </tbody>
           </table>
+          </div>
           <div class="stat-row"><span class="stat-label">Active TCP</span><span class="stat-value" id="tcpCount">0</span></div>
         </div>
 
@@ -214,16 +216,20 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
             Disk Breakdown
           </h2>
-          <table class="data-table">
+          <div class="data-table-wrap">
+            <table class="data-table">
             <thead><tr><th>Mount</th><th class="val">Size</th><th class="val">Used</th><th class="val">Avail</th><th class="val">Use%</th></tr></thead>
             <tbody id="diskTable"></tbody>
           </table>
+          </div>
           <div class="divider"></div>
           <h3 class="section-title">Top Directories</h3>
-          <table class="data-table">
+          <div class="data-table-wrap">
+            <table class="data-table">
             <thead><tr><th>Path</th><th class="val">Size</th></tr></thead>
             <tbody id="dirsTable"></tbody>
           </table>
+          </div>
         </div>
 
         <div class="card">
@@ -231,10 +237,12 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             Top Processes
           </h2>
-          <table class="proc-table">
+          <div class="data-table-wrap">
+            <table class="proc-table">
             <thead><tr><th>PID</th><th>Process</th><th>CPU</th><th>MEM</th><th>Status</th></tr></thead>
             <tbody id="procPreview"></tbody>
           </table>
+          </div>
           <a href="#" class="card-link" data-page="processes">View all processes →</a>
         </div>
       </div>
@@ -278,7 +286,8 @@
             </select>
           </div>
         </div>
-        <table class="proc-table full">
+        <div class="data-table-wrap">
+          <table class="proc-table full">
           <thead>
             <tr>
               <th>PID</th>
@@ -293,6 +302,7 @@
           </thead>
           <tbody id="procFull"></tbody>
         </table>
+        </div>
       </div>
     </div>
 
@@ -335,7 +345,8 @@
         <div id="dockerNotAvailable" class="hidden">
           <p class="empty-state">Docker is not installed or not accessible</p>
         </div>
-        <table class="proc-table full" id="dockerTable">
+        <div class="data-table-wrap">
+          <table class="proc-table full" id="dockerTable">
           <thead>
             <tr>
               <th>Name</th>
@@ -348,6 +359,7 @@
           </thead>
           <tbody id="dockerContainers"></tbody>
         </table>
+        </div>
       </div>
       <div class="card" id="dockerLogsCard" style="display:none">
         <h2 class="card-title">Container Logs: <span id="dockerLogName" style="color:var(--accent)"></span></h2>
@@ -369,7 +381,8 @@
           </div>
         </div>
         <div class="fm-breadcrumb" id="fmBreadcrumb" style="margin-bottom:12px;font-size:13px;color:var(--text-muted);font-family:monospace;"></div>
-        <table class="data-table">
+        <div class="data-table-wrap">
+          <table class="data-table">
           <thead>
             <tr>
               <th style="width:40px">Type</th>
@@ -382,6 +395,7 @@
           </thead>
           <tbody id="fmFiles"></tbody>
         </table>
+        </div>
       </div>
       <div class="card" id="fmEditorCard" style="display:none">
         <h2 class="card-title">Editing: <span id="fmEditorPath" style="color:var(--accent)"></span></h2>

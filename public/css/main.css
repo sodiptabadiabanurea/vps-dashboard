@@ -115,6 +115,7 @@ body {
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
+  min-width: 0;
   box-shadow: var(--shadow);
 }
 .card-title {
@@ -142,7 +143,7 @@ body {
 /* === Gauge Row === */
 .gauge-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -183,7 +184,7 @@ body {
 /* === Info Row === */
 .info-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -202,6 +203,7 @@ body {
 .net-box.tx .net-value { color: var(--yellow); }
 
 /* === Data Tables === */
+.data-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .data-table th {
   text-align: left;
