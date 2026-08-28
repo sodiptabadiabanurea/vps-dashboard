@@ -18,7 +18,7 @@ Modern, real-time VPS monitoring dashboard with WebSocket updates, process manag
 - 🔔 **Telegram Alerts** — CPU/RAM/Disk/Swap threshold notifications
 - 🌙/☀️ **Dark/Light Theme** — Toggle with localStorage persistence
 - 📱 **Mobile Responsive** — Works on phone/tablet
-- 🔒 **Basic Auth** — Password-protected destructive actions
+- 🔒 **Basic Auth** — The whole dashboard (pages, REST API, and the real-time socket) sits behind Basic Auth; `/healthz` is the only public route (liveness probe, no data)
 
 ## Screenshots
 
@@ -68,7 +68,15 @@ npm install
 node server.js
 ```
 
-Dashboard available at `http://localhost:3000`
+Dashboard available at `http://localhost:3000`.
+
+> **Fail-closed credentials:** the server refuses to start unless
+> `DASHBOARD_USER` and `DASHBOARD_PASS` are set and the password is at least
+> 32 characters. Generate one with `openssl rand -hex 32`.
+
+```bash
+DASHBOARD_USER=admin DASHBOARD_PASS="*** rand -hex 32)" node server.js
+```
 
 ## Deploy to VPS
 
@@ -90,7 +98,10 @@ The script will:
 
 ## Configuration
 
-Edit `/etc/systemd/system/vps-dashboard.service`:
+Edit `/etc/systemd/system/vps-dashboard.service` (or a drop-in under
+`vps-dashboard.service.d/`). `DASHBOARD_USER`/`DASHBOARD_PASS` are mandatory:
+the service fails closed without them, and passwords under 32 characters are
+rejected at startup:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -99,6 +110,7 @@ Edit `/etc/systemd/system/vps-dashboard.service`:
 | `DASHBOARD_USER` | admin | Login username |
 | `DASHBOARD_PASS` | (generated) | Login password |
 | `DB_PATH` | /var/lib/vps-dashboard/dashboard.db | SQLite database path |
+| `BACKUP_DIR` | `<DB_PATH dir>/backups` | Backup storage dir (created lazily on first backup) |
 | `TELEGRAM_TOKEN` | (empty) | Telegram Bot API token |
 | `TELEGRAM_CHAT_ID` | (empty) | Telegram chat ID for alerts |
 | `NET_IFACE` | enp0s6 | Network interface to monitor |
@@ -119,7 +131,8 @@ Edit `/etc/systemd/system/vps-dashboard.service`:
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/api/history?range=1h` | No | Historical metrics |
+| GET | `/healthz` | No | Liveness probe (no data) |
+| GET | `/api/history?range=1h` | Yes | Historical metrics |
 | GET | `/api/processes` | Yes | Top processes |
 | POST | `/api/processes/:pid/kill` | Yes | Kill process (SIGTERM) |
 | POST | `/api/processes/:pid/kill-force` | Yes | Force kill (SIGKILL) |
@@ -139,6 +152,15 @@ Edit `/etc/systemd/system/vps-dashboard.service`:
 | GET | `/api/alerts/config` | Yes | Alert config |
 | PUT | `/api/alerts/config/:type` | Yes | Update alert |
 | GET | `/api/alerts` | Yes | Alert history |
+
+## Security
+
+- **Fail-closed credentials** — no default password; short/missing credentials abort startup (`config.js`)
+- **Basic Auth everywhere** — static shell, REST API, and Socket.IO namespace connect all require valid credentials; browsers receive the 401 challenge on page load, so cached credentials ride along on same-origin socket.io polling requests
+- **Polling-only sockets** — clients are pinned to `transports: ['polling']` because WebSocket handshakes cannot carry Basic Auth headers across browsers (notably iOS Safari)
+- **Input hardening** — service/container/file names strictly validated, no shell interpolation in Docker/network-tool/backup commands, file manager confined to `FM_ROOT` with symlink-escape protection
+- **Rate limiting** — per-endpoint limiters on auth, sensitive operations, file writes, and config changes
+- **Tests** — `npm test` runs the Node security suite; CI (`tests.yml`) runs it on every push/PR
 
 ## Tech Stack
 
