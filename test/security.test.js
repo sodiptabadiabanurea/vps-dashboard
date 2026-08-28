@@ -164,3 +164,50 @@ test('static shell and socket transport stay behind Basic Auth', async () => {
     fs.rmSync(path.dirname(dbPath), { recursive: true, force: true });
   }
 });
+
+test('CSRF guard rejects cross-origin state-changing requests', () => {
+  const { csrfProtection } = require('../csrf');
+  const makeReq = (headers) => ({ method: 'POST', headers, get(name) { return this.headers[name.toLowerCase()]; }, protocol: 'https' });
+  const makeRes = () => ({ statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } });
+
+  const crossSite = makeRes();
+  csrfProtection(makeReq({ host: 'dashboard.example.com', 'sec-fetch-site': 'cross-site' }), crossSite, () => { throw new Error('next() should not be called'); });
+  assert.equal(crossSite.statusCode, 403);
+
+  const badOrigin = makeRes();
+  csrfProtection(makeReq({ host: 'dashboard.example.com', origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }), badOrigin, () => { throw new Error('next() should not be called'); });
+  assert.equal(badOrigin.statusCode, 403);
+});
+
+test('CSRF guard accepts same-origin and non-browser state-changing requests', () => {
+  const { csrfProtection } = require('../csrf');
+  const makeReq = (headers) => ({ method: 'POST', headers, get(name) { return this.headers[name.toLowerCase()]; }, protocol: 'https' });
+  const makeRes = () => ({ statusCode: 200, status(code) { this.statusCode = code; return this; }, json() { return this; } });
+
+  let called = false;
+  const sameOrigin = makeRes();
+  csrfProtection(makeReq({ host: 'dashboard.example.com', origin: 'https://dashboard.example.com', 'sec-fetch-site': 'same-origin' }), sameOrigin, () => { called = true; });
+  assert.equal(called, true);
+  assert.equal(sameOrigin.statusCode, 200);
+
+  called = false;
+  const nonBrowser = makeRes();
+  csrfProtection(makeReq({ host: 'dashboard.example.com' }), nonBrowser, () => { called = true; });
+  assert.equal(called, true);
+  assert.equal(nonBrowser.statusCode, 200);
+});
+
+test('CSRF guard validates Referer and malformed Origin', () => {
+  const { csrfProtection } = require('../csrf');
+  const makeReq = (headers) => ({ method: 'POST', headers, get(name) { return this.headers[name.toLowerCase()]; }, protocol: 'https' });
+  const makeRes = () => ({ statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } });
+
+  const validReferer = makeRes();
+  let called = false;
+  csrfProtection(makeReq({ host: 'dashboard.example.com', referer: 'https://dashboard.example.com/settings', 'sec-fetch-site': 'same-origin' }), validReferer, () => { called = true; });
+  assert.equal(called, true);
+
+  const malformedOrigin = makeRes();
+  csrfProtection(makeReq({ host: 'dashboard.example.com', origin: 'null', 'sec-fetch-site': 'same-origin' }), malformedOrigin, () => { throw new Error('next() should not be called'); });
+  assert.equal(malformedOrigin.statusCode, 403);
+});
