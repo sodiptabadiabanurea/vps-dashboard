@@ -18,6 +18,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 APP_DIR="/opt/vps-dashboard"
 DB_DIR="/var/lib/vps-dashboard"
+SECRET_FILE="/etc/vps-dashboard.env"
 DOMAIN="kakibaabu.duckdns.org"
 PORT=3000
 NODE_VERSION="20"
@@ -89,10 +90,11 @@ success "Dependencies installed"
 info "Step 6/8: Generating credentials..."
 # 64 hex characters (256 bits); config.js requires at least 32 characters.
 DASH_PASS=$(openssl rand -hex 32)
-success "Generated dashboard password: ${DASH_PASS}"
-echo ""
-warn "SAVE THIS PASSWORD! You'll need it to login."
-echo ""
+# Keep credentials outside the repository and out of the systemd unit.
+# umask + mode 600 prevent other local users from reading the secret file.
+sudo sh -c "umask 077; printf '%s\\n' 'DASHBOARD_USER=admin' 'DASHBOARD_PASS=${DASH_PASS}' > '${SECRET_FILE}'"
+sudo chmod 600 "$SECRET_FILE"
+success "Dashboard credential generated and stored in ${SECRET_FILE} (mode 600)"
 
 info "Step 7/8: Creating systemd service..."
 sudo tee /etc/systemd/system/vps-dashboard.service > /dev/null <<EOF
@@ -109,9 +111,8 @@ RestartSec=5
 Environment=PORT=${PORT}
 Environment=HOST=127.0.0.1
 Environment=DB_PATH=${DB_DIR}/dashboard.db
-Environment=DASHBOARD_USER=admin
-Environment=DASHBOARD_PASS=${DASH_PASS}
-# Telegram Alerts (uncomment and set your values):
+EnvironmentFile=${SECRET_FILE}
+# Telegram Alerts (uncomment and set values in a root-only credential file):
 # Environment=TELEGRAM_TOKEN=your-bot-token
 # Environment=TELEGRAM_CHAT_ID=your-chat-id
 # Network interface (auto-detected, override if needed):
@@ -196,9 +197,10 @@ echo "============================================================"
 echo ""
 echo "  Dashboard: https://${DOMAIN}"
 echo "  Username:  admin"
-echo "  Password:  ${DASH_PASS}"
+echo "  Password:  stored in ${SECRET_FILE} (root-only)"
 echo ""
 echo "  Config:    /etc/systemd/system/vps-dashboard.service"
+echo "  Secrets:   ${SECRET_FILE} (mode 600)"
 echo "  Database:  ${DB_DIR}/dashboard.db"
 echo "  Logs:      journalctl -u vps-dashboard -f"
 echo ""
@@ -209,8 +211,8 @@ echo "    journalctl -u vps-dashboard -f"
 echo ""
 echo "  To enable Telegram alerts:"
 echo "    1. Create bot via @BotFather"
-echo "    2. Edit service: sudo nano /etc/systemd/system/vps-dashboard.service"
-echo "    3. Uncomment TELEGRAM_TOKEN and TELEGRAM_CHAT_ID"
+echo "    2. Add TELEGRAM_TOKEN and TELEGRAM_CHAT_ID to a root-only env file"
+echo "    3. Update the systemd EnvironmentFile= entry"
 echo "    4. sudo systemctl daemon-reload && sudo systemctl restart vps-dashboard"
 echo ""
 echo "  To get SSL (if not already):"
