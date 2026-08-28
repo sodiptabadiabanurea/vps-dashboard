@@ -95,6 +95,9 @@ test('static shell and socket transport stay behind Basic Auth', async () => {
     cwd: path.join(__dirname, '..'),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  let childErr = '';
+  child.stdout.on('data', (d) => { childErr += d.toString(); });
+  child.stderr.on('data', (d) => { childErr += d.toString(); });
   const base = `http://127.0.0.1:${port}`;
   const auth = `Basic ${Buffer.from('admin:' + 'a'.repeat(32)).toString('base64')}`;
 
@@ -109,7 +112,7 @@ test('static shell and socket transport stay behind Basic Auth', async () => {
         await new Promise((r) => setTimeout(r, 200));
       }
     }
-    assert.equal(up, true, 'server did not start');
+    assert.equal(up, true, `server did not start; child output: ${childErr.slice(0, 800)}`);
 
     // Liveness probe stays public and carries no data.
     assert.equal((await fetch(`${base}/healthz`)).status, 200);
