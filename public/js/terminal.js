@@ -62,8 +62,8 @@
       term.open(container);
     }
 
-    // Connect to terminal socket
-    termSocket = io('/terminal');
+    // Connect to terminal socket (polling-only, same auth reason as socket.js)
+    termSocket = io('/terminal', { transports: ['polling'] });
 
     termSocket.on('output', (data) => term.write(data));
     termSocket.on('exit', () => term.write('\r\n[Process exited]\r\n'));
