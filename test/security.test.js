@@ -74,3 +74,93 @@ test('terminal parses Basic credentials without shell execution', () => {
   assert.deepEqual(parseBasicCredentials(header), { user: 'admin', pass: 'a'.repeat(32) });
   assert.equal(parseBasicCredentials('Bearer token'), null);
 });
+
+test('static shell and socket transport stay behind Basic Auth', async () => {
+  // Regression test for the PR #1 bug: the socket.io middleware rejected
+  // browsers whose Authorization header never got attached (shell was public,
+  // so no 401 challenge was ever issued). Gating the static shell restores
+  // the browser credential cache for same-origin socket.io polling requests.
+  const port = 3199;
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vps-dashboard-auth-')), 'test.db');
+  const env = {
+    ...process.env,
+    PORT: String(port),
+    HOST: '127.0.0.1',
+    DB_PATH: dbPath,
+    DASHBOARD_USER: 'admin',
+    DASHBOARD_PASS: 'a'.repeat(32),
+  };
+  const child = require('child_process').spawn(process.execPath, ['server.js'], {
+    env,
+    cwd: path.join(__dirname, '..'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let childErr = '';
+  child.stdout.on('data', (d) => { childErr += d.toString(); });
+  child.stderr.on('data', (d) => { childErr += d.toString(); });
+  const base = `http://127.0.0.1:${port}`;
+  const auth = `Basic ${Buffer.from('admin:' + 'a'.repeat(32)).toString('base64')}`;
+
+  try {
+    // Wait for the server to listen.
+    let up = false;
+    for (let i = 0; i < 50 && !up; i++) {
+      try {
+        await fetch(`${base}/healthz`);
+        up = true;
+      } catch {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    assert.equal(up, true, `server did not start; child output: ${childErr.slice(0, 800)}`);
+
+    // Liveness probe stays public and carries no data.
+    assert.equal((await fetch(`${base}/healthz`)).status, 200);
+
+    // Static shell must challenge unauthenticated browsers.
+    const anonShell = await fetch(`${base}/`);
+    assert.equal(anonShell.status, 401);
+    assert.match(anonShell.headers.get('www-authenticate') || '', /Basic/);
+
+    // Authenticated browsers get the shell.
+    assert.equal((await fetch(`${base}/`, { headers: { Authorization: auth } })).status, 200);
+
+    // socket.io namespace connect must reject unauthenticated transports.
+    // The engine handshake is unauthenticated by design; the auth boundary
+    // fires when the client attaches to the namespace (packet '40').
+    const anonEngine = await fetch(`${base}/socket.io/?EIO=4&transport=polling`);
+    assert.equal(anonEngine.status, 200);
+    const anonSid = JSON.parse((await anonEngine.text()).slice(1)).sid;
+    const anonPost = await fetch(`${base}/socket.io/?EIO=4&transport=polling&sid=${anonSid}`, {
+      method: 'POST',
+      body: '40',
+    });
+    assert.equal(anonPost.status, 200);
+    const anonNs = await fetch(`${base}/socket.io/?EIO=4&transport=polling&sid=${anonSid}`);
+    assert.match(await anonNs.text(), /Authentication required/);
+
+    // Authenticated handshake + namespace connect succeeds and streams packets.
+    const authEngine = await fetch(`${base}/socket.io/?EIO=4&transport=polling`, {
+      headers: { Authorization: auth },
+    });
+    assert.equal(authEngine.status, 200);
+    const authSid = JSON.parse((await authEngine.text()).slice(1)).sid;
+    const authPost = await fetch(`${base}/socket.io/?EIO=4&transport=polling&sid=${authSid}`, {
+      method: 'POST',
+      body: '40',
+      headers: { Authorization: auth },
+    });
+    assert.equal(authPost.status, 200);
+    const authNs = await fetch(`${base}/socket.io/?EIO=4&transport=polling&sid=${authSid}`, {
+      headers: { Authorization: auth },
+    });
+    assert.match(await authNs.text(), /40\{"sid"/);
+
+    // Client transport is pinned to authenticated long-polling.
+    const socketJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'socket.js'), 'utf8');
+    assert.match(socketJs, /transports:\s*\['polling'\]/);
+  } finally {
+    child.kill('SIGTERM');
+    fs.rmSync(path.dirname(dbPath), { recursive: true, force: true });
+  }
+});

@@ -10,7 +10,20 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+
+// Public liveness probe for uptime monitoring; carries no data.
+app.get('/healthz', (req, res) => res.status(200).json({ ok: true }));
+
+// The static shell sits behind Basic Auth so browsers cache credentials for
+// the origin on first load; subsequent same-origin requests (including
+// socket.io long-polling) then carry the Authorization header automatically.
+// This gate intentionally skips audit logging (one asset request per file
+// would flood the login table); API routes keep full audit via requireAuth.
+app.use((req, res, next) => {
+  if (isAuthenticated(req)) return next();
+  res.set('WWW-Authenticate', 'Basic realm="VPS Dashboard"');
+  return res.status(401).send('Authentication required');
+}, express.static(path.join(__dirname, 'public')));
 
 // --- Basic Auth middleware ---
 function parseBasicCredentials(header) {
@@ -40,6 +53,11 @@ function isAllowedSocketOrigin(socket) {
   } catch {
     return false;
   }
+}
+
+function isAuthenticated(req) {
+  const credentials = parseBasicCredentials(req.headers.authorization);
+  return Boolean(credentials && credentials.user === config.user && credentials.pass === config.pass);
 }
 
 function requireAuth(req, res, next) {
