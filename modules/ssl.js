@@ -7,15 +7,42 @@ function isPrivateIPv4(address) {
   const parts = address.split('.').map(Number);
   if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
   const [a, b] = parts;
-  return a === 10 || a === 127 || (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && (b === 0 || b === 168)) ||
+    (a === 198 && b >= 18 && b <= 19) ||
+    (a === 203 && b === 0) ||
+    a >= 224
+  );
 }
 
 function isPrivateAddress(address) {
   if (net.isIPv4(address)) return isPrivateIPv4(address);
   if (!net.isIPv6(address)) return true;
+
   const normalized = address.toLowerCase();
-  return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:');
+
+  // IPv4-mapped IPv6 addresses can otherwise bypass an IPv4-only check.
+  // Node treats these as IPv6 addresses (e.g. ::ffff:127.0.0.1).
+  if (normalized.startsWith('::ffff:')) {
+    const mapped = normalized.slice('::ffff:'.length);
+    if (net.isIPv4(mapped)) return isPrivateIPv4(mapped);
+  }
+
+  // Loopback, unspecified, unique-local, link-local, and multicast ranges.
+  return (
+    normalized === '::' ||
+    normalized === '::1' ||
+    normalized.startsWith('fc') ||
+    normalized.startsWith('fd') ||
+    normalized.startsWith('fe80:') ||
+    normalized.startsWith('ff')
+  );
 }
 
 async function resolvePublicAddress(domain) {
