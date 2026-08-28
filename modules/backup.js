@@ -12,12 +12,17 @@ function runCmd(cmd) {
   });
 }
 
-const BACKUP_DIR = process.env.BACKUP_DIR || '/var/lib/vps-dashboard/backups';
+// Derive the backup dir from the DB location unless explicitly overridden,
+// and never create it at module load: startup must not fail (or touch
+// protected paths) just because backups have never been requested.
+const BACKUP_DIR = process.env.BACKUP_DIR
+  || path.join(path.dirname(process.env.DB_PATH || '/var/lib/vps-dashboard/dashboard.db'), 'backups');
+
+function ensureBackupDir() {
+  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
 
 function setupBackupRoutes(app, requireAuth, auditLog, config) {
-  // Ensure backup dir exists
-  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-
   // List backups
   app.get('/api/backups', requireAuth, (req, res) => {
     try {
@@ -45,6 +50,7 @@ function setupBackupRoutes(app, requireAuth, auditLog, config) {
       const dbPath = config.dbPath || '/var/lib/vps-dashboard/dashboard.db';
       const appDir = '/opt/vps-dashboard';
 
+      ensureBackupDir();
       await runCmd(`tar -czf ${backupPath} -C / ${dbPath.replace('/', '')} -C ${appDir} config.js package.json 2>/dev/null || true`);
 
       if (auditLog) auditLog('backup_create', `Created: ${backupName}`);
