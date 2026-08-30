@@ -2,6 +2,12 @@
 # ============================================================
 # VPS Dashboard - Complete Deploy Script for kakibaabu
 # ============================================================
+# Live-safe deployment: the new release is built entirely in a staging
+# directory ($APP_DIR.new) and is only moved into place AFTER the native
+# module probe passes. The running service is never overwritten in place —
+# that pattern corrupted mmap'ed .node files of the live process and caused
+# a SEGV crash loop (incident 2026-08-30). Sequence: stage → install →
+# probe → swap dirs → stop → start → health gate (auto-rollback on failure).
 set -e
 
 # Colors
@@ -17,6 +23,8 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 APP_DIR="/opt/vps-dashboard"
+STAGE_DIR="${APP_DIR}.new"
+PREV_DIR="${APP_DIR}.prev"
 DB_DIR="/var/lib/vps-dashboard"
 SECRET_FILE="/etc/vps-dashboard.env"
 DOMAIN="kakibaabu.duckdns.org"
@@ -88,24 +96,26 @@ else
 fi
 success "Directories created"
 
-info "Step 4/8: Copying application files..."
+info "Step 4/8: Staging release in ${STAGE_DIR} (live tree untouched)..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-sudo cp -r "$SCRIPT_DIR"/* "$APP_DIR/"
-sudo cp -r "$SCRIPT_DIR"/.gitignore "$APP_DIR/" 2>/dev/null || true
+sudo rm -rf "$STAGE_DIR"
+sudo mkdir -p "$STAGE_DIR"
+sudo cp -r "$SCRIPT_DIR"/* "$STAGE_DIR/"
+sudo cp -r "$SCRIPT_DIR"/.gitignore "$STAGE_DIR/" 2>/dev/null || true
 # Never let a checkout's node_modules shadow the deployed one: stale native
 # binaries built for a different Node ABI (e.g. an nvm Node v24 build) survive
 # `npm install` unchanged when versions already satisfy the lockfile, and then
 # crash the service with ERR_DLOPEN_FAILED. npm rebuilds the tree below.
-sudo rm -rf "$APP_DIR/node_modules"
+sudo rm -rf "$STAGE_DIR/node_modules"
 if [ "$RUNNING_AS_ROOT" = true ]; then
-  sudo chown -R root:root "$APP_DIR"
+  sudo chown -R root:root "$STAGE_DIR"
 else
-  sudo chown -R $USER:$USER "$APP_DIR"
+  sudo chown -R $USER:$USER "$STAGE_DIR"
 fi
-success "Files copied to $APP_DIR"
+success "Release staged in $STAGE_DIR"
 
-info "Step 5/8: Installing npm dependencies..."
-cd "$APP_DIR"
+info "Step 5/8: Installing npm dependencies (staged)..."
+cd "$STAGE_DIR"
 
 # 5a. Pin the Node interpreter for the systemd unit BEFORE installing, so
 # npm's build scripts run under the same interpreter the service will use.
@@ -147,33 +157,43 @@ success "Dependencies installed"
 NATIVE_CHECK="const D=require('better-sqlite3');const db=new D(':memory:');db.exec('CREATE TABLE t(a)');db.prepare('INSERT INTO t VALUES (1)').run();const P=require('node-pty');const p=P.spawn('/bin/true');p.kill();process.exit(0)"
 
 info "Verifying native modules against $NODE_BIN ($("$NODE_BIN" -v))..."
-if ! (cd "$APP_DIR" && sudo "$NODE_BIN" -e "$NATIVE_CHECK" >/dev/null 2>&1); then
+if ! (cd "$STAGE_DIR" && sudo "$NODE_BIN" -e "$NATIVE_CHECK" >/dev/null 2>&1); then
   warn "Native modules incompatible with $NODE_BIN; rebuilding them..."
   if [ -n "$NPM_CLI" ] && [ -f "$NPM_CLI" ]; then
-    (cd "$APP_DIR" && sudo env PATH="$(dirname "$NODE_BIN"):$PATH" "$NODE_BIN" "$NPM_CLI" rebuild better-sqlite3 node-pty 2>&1 | tail -3) || true
+    (cd "$STAGE_DIR" && sudo env PATH="$(dirname "$NODE_BIN"):$PATH" "$NODE_BIN" "$NPM_CLI" rebuild better-sqlite3 node-pty 2>&1 | tail -3) || true
   else
     warn "No npm found next to $NODE_BIN; skipping automatic rebuild"
   fi
-  (cd "$APP_DIR" && sudo "$NODE_BIN" -e "$NATIVE_CHECK" >/dev/null 2>&1) \
+  (cd "$STAGE_DIR" && sudo "$NODE_BIN" -e "$NATIVE_CHECK" >/dev/null 2>&1) \
     || error "Native modules still fail under $NODE_BIN after rebuild. Install a matching Node or rebuild manually, then re-run."
 fi
 success "Node interpreter pinned: $NODE_BIN ($("$NODE_BIN" -v))"
 
-info "Step 6/8: Generating credentials..."
+info "Step 6/8: Preparing credentials..."
 # 64 hex characters (256 bits); config.js requires at least 32 characters.
-DASH_PASS=$(openssl rand -hex 32)
 # Keep credentials outside the repository and out of the systemd unit.
-# umask + mode 600 prevent other local users from reading the secret file.
-# The password is piped via stdin so it never appears in a process argv.
-printf 'DASHBOARD_USER=admin\nDASHBOARD_PASS=%s\n' "$DASH_PASS" \
-  | sudo sh -c "umask 077; cat > '${SECRET_FILE}'"
-sudo chmod 600 "$SECRET_FILE"
-success "Dashboard credential generated and stored in ${SECRET_FILE} (mode 600)"
+if [ -f "$SECRET_FILE" ]; then
+  # Reuse the existing secret so the dashboard login does not rotate on every
+  # redeploy. The file stays the single source of truth; nothing is printed.
+  DASH_USER="$(sudo sed -nE 's/^DASHBOARD_USER=//p' "$SECRET_FILE" | head -1)"
+  DASH_PASS="$(sudo sed -nE 's/^DASHBOARD_PASS=//p' "$SECRET_FILE" | head -1)"
+  [ -n "$DASH_PASS" ] || error "Existing ${SECRET_FILE} has no DASHBOARD_PASS — fix or delete the file and re-run"
+  [ -n "$DASH_USER" ] || DASH_USER="admin"
+  info "Reusing existing credentials from ${SECRET_FILE} (no rotation on redeploy)"
+else
+  DASH_USER="admin"
+  DASH_PASS=$(openssl rand -hex 32)
+  # umask + mode 600 prevent other local users from reading the secret file.
+  # The password is piped via stdin so it never appears in a process argv.
+  printf 'DASHBOARD_USER=%s\nDASHBOARD_PASS=%s\n' "$DASH_USER" "$DASH_PASS" \
+    | sudo sh -c "umask 077; cat > '${SECRET_FILE}'"
+  sudo chmod 600 "$SECRET_FILE"
+  success "Dashboard credential generated and stored in ${SECRET_FILE} (mode 600)"
+fi
 
 # Sanitize stale credentials from existing drop-ins. systemd applies
 # Environment= (any drop-in) AFTER EnvironmentFile=, so a leftover
-# DASHBOARD_PASS= line would silently override the freshly generated secret
-# and keep the OLD password valid — defeating the hardening.
+# DASHBOARD_PASS= line would silently override the secret in the env file.
 if [ -d "$UNIT_DROPIN_DIR" ]; then
   sudo sh -c '
     for conf in "$1"/*.conf; do
@@ -201,7 +221,7 @@ if [ -d "$UNIT_DROPIN_DIR" ]; then
   info "Sanitized stale dashboard credentials from existing drop-ins (if any)"
 fi
 
-info "Step 7/8: Creating systemd service..."
+info "Step 7/8: Installing systemd service and swapping release..."
 sudo tee "$UNIT_FILE" > /dev/null <<EOF
 [Unit]
 Description=VPS Dashboard
@@ -235,10 +255,62 @@ fi
 
 sudo systemctl daemon-reload
 sudo systemctl enable vps-dashboard
-# restart (not start): the running process must pick up the rotated secret;
-# start is a no-op on an active unit and would leave the OLD password live.
-sudo systemctl restart vps-dashboard
-success "systemd service created and restarted"
+
+# --- Live-safe swap -------------------------------------------------------
+# Directory renames are atomic and never touch the files the running process
+# has open/mmap'ed, so the old service keeps serving from the old inode tree
+# until we explicitly stop it. Downtime = stop + start + boot (a few seconds).
+sudo rm -rf "$PREV_DIR"
+[ -d "$APP_DIR" ] && sudo mv "$APP_DIR" "$PREV_DIR"
+sudo mv "$STAGE_DIR" "$APP_DIR"
+if [ "$RUNNING_AS_ROOT" = true ]; then
+  sudo chown root:root "$APP_DIR"
+else
+  sudo chown $USER:$USER "$APP_DIR"
+fi
+sudo systemctl stop vps-dashboard 2>/dev/null || true
+sudo systemctl start vps-dashboard
+info "Release swapped into ${APP_DIR}; previous release kept at ${PREV_DIR}"
+
+# Health gate: prove the new release actually serves before declaring
+# success. On failure, restore the previous release automatically.
+rollback_to_prev() {
+  warn "Health gate FAILED — rolling back to previous release..."
+  sudo systemctl stop vps-dashboard 2>/dev/null || true
+  if [ -d "$PREV_DIR" ]; then
+    sudo rm -rf "$APP_DIR"
+    sudo mv "$PREV_DIR" "$APP_DIR"
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo systemctl start vps-dashboard || true
+    sleep 3
+    if systemctl is-active --quiet vps-dashboard; then
+      error "Rolled back to ${PREV_DIR}; service restored. Investigate before re-deploying."
+    else
+      error "Rollback completed but service did not start — MANUAL INTERVENTION REQUIRED"
+    fi
+  else
+    error "Health gate failed and no previous release at ${PREV_DIR} — MANUAL INTERVENTION REQUIRED"
+  fi
+}
+
+GATE_OK=""
+for _ in $(seq 1 15); do
+  sleep 2
+  if systemctl is-active --quiet vps-dashboard; then
+    HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/healthz" || true)"
+    if [ "$HTTP_CODE" = "200" ]; then GATE_OK=1; break; fi
+  fi
+done
+if [ -z "$GATE_OK" ]; then
+  rollback_to_prev
+fi
+# Auth gate: the service must also accept the credential from the env file.
+AUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' -u "${DASH_USER}:${DASH_PASS}" "http://127.0.0.1:${PORT}/" || true)"
+if [ "$AUTH_CODE" != "200" ]; then
+  warn "Auth check returned ${AUTH_CODE}"
+  rollback_to_prev
+fi
+success "systemd service running on new release (healthz 200, auth 200)"
 
 info "Step 8/8: Configuring nginx..."
 
@@ -320,13 +392,14 @@ echo -e "  ${GREEN}Deploy Complete!${NC}"
 echo "============================================================"
 echo ""
 echo "  Dashboard: https://${DOMAIN}"
-echo "  Username:  admin"
+echo "  Username:  ${DASH_USER}"
 echo "  Password:  stored in ${SECRET_FILE} (root-only)"
 echo ""
-echo "  Config:    /etc/systemd/system/vps-dashboard.service"
+echo "  Config:    ${UNIT_FILE}"
 echo "  Secrets:   ${SECRET_FILE} (mode 600)"
 echo "  Database:  ${DB_DIR}/dashboard.db"
 echo "  Logs:      journalctl -u vps-dashboard -f"
+echo "  Previous release kept at: ${PREV_DIR} (auto-rollback on failed health gate)"
 echo ""
 echo "  Commands:"
 echo "    sudo systemctl restart vps-dashboard"
@@ -342,4 +415,3 @@ echo ""
 echo "  To get SSL (if not already):"
 echo "    sudo certbot --nginx -d ${DOMAIN}"
 echo ""
-echo "============================================================"
