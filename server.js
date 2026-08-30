@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const config = require('./config');
 const { db, stmts } = require('./db');
+const { csrfProtection } = require('./csrf');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,6 +25,10 @@ app.use((req, res, next) => {
   res.set('WWW-Authenticate', 'Basic realm="VPS Dashboard"');
   return res.status(401).send('Authentication required');
 }, express.static(path.join(__dirname, 'public')));
+
+// Reject browser cross-site state changes before they reach any mutating API.
+// Non-browser API clients without browser provenance headers remain supported.
+app.use(csrfProtection);
 
 // --- Basic Auth middleware ---
 function parseBasicCredentials(header) {
