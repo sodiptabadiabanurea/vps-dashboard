@@ -81,28 +81,43 @@ DASHBOARD_USER=admin DASHBOARD_PASS="*** rand -hex 32)" node server.js
 ## Deploy to VPS
 
 ```bash
-# One-command deploy
+# One-command deploy (live-safe)
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-The script will:
+The script is **live-safe**: it builds the new release in a staging
+directory while the current service keeps serving, and only touches the
+live tree via atomic directory renames after all checks pass. It will:
+
 1. Install Node.js (if missing)
 2. Install nginx (if missing)
 3. Back up the current systemd unit + drop-ins to `/root/backups/` (if present)
-4. Copy files to `/opt/vps-dashboard`
-5. Install npm dependencies
-6. Pin a Node interpreter (existing unit's interpreter first, then system
-   paths) and verify/rebuild native modules against it — avoids a SIGSEGV
-   crash loop when `node` resolves to a version with a different ABI
-7. Generate a random password and store it in `/etc/vps-dashboard.env`
-   (root-only, mode 600) — never printed, and never embedded in the unit
-8. Sanitize any stale `DASHBOARD_USER`/`DASHBOARD_PASS` from existing
-   drop-ins (they would otherwise override the secret file), install the
-   systemd unit with `EnvironmentFile=`, and restart the service
+4. Stage the release in `/opt/vps-dashboard.new` — the live tree at
+   `/opt/vps-dashboard` is never modified while the service runs (the
+   checkout's `node_modules` is never carried in)
+5. Install npm dependencies in the staging dir, with the Node interpreter
+   pinned from the existing unit's `ExecStart` first (then system paths),
+   so native modules are always built for the ABI the service runs
+6. Real-load probe of the native modules (`better-sqlite3` DB open +
+   `node-pty` spawn — a bare `require()` would false-negative on
+   ABI-mismatched binaries); automatic rebuild under the pinned
+   interpreter on mismatch
+7. Prepare credentials: REUSE the existing `/etc/vps-dashboard.env` on
+   redeploy (no rotation side effect); generate a fresh random password
+   only on first install (root-only, mode 600) — never printed, never
+   embedded in the unit. Stale `DASHBOARD_USER`/`DASHBOARD_PASS` lines
+   are sanitized from existing drop-ins
+8. Atomic swap (`APP_DIR` → `.prev`, staged → `APP_DIR`), one service
+   restart, then a **health gate**: `/healthz` must return 200 and the
+   env-file credential must authenticate. On failure the script
+   automatically restores `.prev`, restarts, and exits non-zero
 9. Configure nginx reverse proxy — skipped entirely if an enabled site
    already serves the domain; SSL is detected as root so root-only
    `/etc/letsencrypt` permissions don't break detection
+
+The previous release stays at `/opt/vps-dashboard.prev` as the rollback
+target. Typical downtime is the stop/start window only (a few seconds).
 
 ## Configuration
 
@@ -166,10 +181,15 @@ rejected at startup:
 ## Security
 
 - **Fail-closed credentials** — no default password; short/missing credentials abort startup (`config.js`)
+- **Credential containment** — the secret lives only in `/etc/vps-dashboard.env` (umask 077, mode 600, root-only), loaded via systemd `EnvironmentFile=`; never printed by the deploy, never embedded in `Environment=` lines or drop-ins (deploy.sh sanitizes stale ones and aborts if a leak is detected). Redeploys reuse the existing secret — rotation is an explicit operation
 - **Basic Auth everywhere** — static shell, REST API, and Socket.IO namespace connect all require valid credentials; browsers receive the 401 challenge on page load, so cached credentials ride along on same-origin socket.io polling requests
+- **CSRF protection** — state-changing endpoints require a same-origin `Origin` header; cross-origin POSTs are rejected with 403
+- **SSRF boundary** — the SSL checker resolves the target and refuses private/local addresses before connecting
+- **Backup hardening** — backup creation uses `execFile` + tar with no shell interpolation
 - **Polling-only sockets** — clients are pinned to `transports: ['polling']` because WebSocket handshakes cannot carry Basic Auth headers across browsers (notably iOS Safari)
 - **Input hardening** — service/container/file names strictly validated, no shell interpolation in Docker/network-tool/backup commands, file manager confined to `FM_ROOT` with symlink-escape protection
 - **Rate limiting** — per-endpoint limiters on auth, sensitive operations, file writes, and config changes
+- **Live-safe deployment** — staging build, native-module real-load probe, atomic swap, health/auth gate with automatic rollback (see Deploy above)
 - **Tests** — `npm test` runs the Node security suite; CI (`tests.yml`) runs it on every push/PR
 
 ## Tech Stack
