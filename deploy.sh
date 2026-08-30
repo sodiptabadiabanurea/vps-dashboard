@@ -18,6 +18,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 APP_DIR="/opt/vps-dashboard"
 DB_DIR="/var/lib/vps-dashboard"
+SECRET_FILE="/etc/vps-dashboard.env"
 DOMAIN="kakibaabu.duckdns.org"
 PORT=3000
 NODE_VERSION="20"
@@ -58,6 +59,23 @@ else
   success "nginx installed and started"
 fi
 
+UNIT_FILE="/etc/systemd/system/vps-dashboard.service"
+UNIT_DROPIN_DIR="${UNIT_FILE}.d"
+EXISTING_UNIT=""
+if [ -f "$UNIT_FILE" ]; then
+  EXISTING_UNIT="$UNIT_FILE"
+fi
+
+# Rollback safety: snapshot the current unit + drop-ins before touching
+# anything, so a failed deploy can be undone without guessing.
+if [ -n "$EXISTING_UNIT" ] || [ -d "$UNIT_DROPIN_DIR" ]; then
+  BACKUP_DIR="/root/backups/vps-dashboard-deploy-$(date +%Y%m%d-%H%M%S)"
+  sudo mkdir -p "$BACKUP_DIR"
+  [ -n "$EXISTING_UNIT" ] && sudo cp -a "$UNIT_FILE" "$BACKUP_DIR/" 2>/dev/null || true
+  [ -d "$UNIT_DROPIN_DIR" ] && sudo cp -a "$UNIT_DROPIN_DIR" "$BACKUP_DIR/" 2>/dev/null || true
+  info "Backed up current service config to $BACKUP_DIR"
+fi
+
 info "Step 3/8: Creating directories..."
 sudo mkdir -p "$APP_DIR"
 sudo mkdir -p "$DB_DIR"
@@ -86,16 +104,91 @@ cd "$APP_DIR"
 sudo npm install --production 2>&1 | tail -3
 success "Dependencies installed"
 
+# 5b. Pin the Node interpreter for the systemd unit.
+# Do NOT rely on `which node`: a shell/nvm Node whose ABI differs from the
+# one the native modules (better-sqlite3, node-pty) were built for causes a
+# SIGSEGV crash loop at startup. Prefer whatever the existing unit already
+# runs, then system locations, then PATH.
+NODE_BIN=""
+if [ -f "$EXISTING_UNIT" ]; then
+  CURRENT_BIN="$(sed -nE 's/^ExecStart=([^ ]+).*$/\1/p' "$EXISTING_UNIT" | head -1)"
+  if [ -n "$CURRENT_BIN" ] && [ -x "$CURRENT_BIN" ]; then
+    NODE_BIN="$CURRENT_BIN"
+    info "Reusing Node from existing service unit: $NODE_BIN ($("$NODE_BIN" -v))"
+  fi
+fi
+if [ -z "$NODE_BIN" ]; then
+  for CANDIDATE in /usr/bin/node /usr/local/bin/node "$(command -v node || true)"; do
+    if [ -n "$CANDIDATE" ] && [ -x "$CANDIDATE" ]; then
+      NODE_BIN="$CANDIDATE"
+      break
+    fi
+  done
+fi
+[ -n "$NODE_BIN" ] || error "No usable Node.js interpreter found"
+
+info "Verifying native modules against $NODE_BIN ($("$NODE_BIN" -v))..."
+if ! (cd "$APP_DIR" && sudo "$NODE_BIN" -e "require('better-sqlite3'); require('node-pty')" >/dev/null 2>&1); then
+  warn "Native modules incompatible with $NODE_BIN; rebuilding them..."
+  # Rebuild with the npm that ships NEXT TO the pinned interpreter, executed
+  # under that same interpreter — guarantees the rebuilt .node binaries match
+  # the ABI the service will actually run, regardless of the invoking shell's
+  # PATH (nvm etc.).
+  NPM_CLI="$(readlink -f "$(dirname "$NODE_BIN")/npm" 2>/dev/null || true)"
+  if [ -n "$NPM_CLI" ] && [ -f "$NPM_CLI" ]; then
+    (cd "$APP_DIR" && sudo "$NODE_BIN" "$NPM_CLI" rebuild better-sqlite3 node-pty 2>&1 | tail -3) || true
+  else
+    warn "No npm found next to $NODE_BIN; skipping automatic rebuild"
+  fi
+  (cd "$APP_DIR" && sudo "$NODE_BIN" -e "require('better-sqlite3'); require('node-pty')" >/dev/null 2>&1) \
+    || error "Native modules still fail under $NODE_BIN after rebuild. Install a matching Node or rebuild manually, then re-run."
+fi
+success "Node interpreter pinned: $NODE_BIN ($("$NODE_BIN" -v))"
+
 info "Step 6/8: Generating credentials..."
 # 64 hex characters (256 bits); config.js requires at least 32 characters.
 DASH_PASS=$(openssl rand -hex 32)
-success "Generated dashboard password: ${DASH_PASS}"
-echo ""
-warn "SAVE THIS PASSWORD! You'll need it to login."
-echo ""
+# Keep credentials outside the repository and out of the systemd unit.
+# umask + mode 600 prevent other local users from reading the secret file.
+# The password is piped via stdin so it never appears in a process argv.
+printf 'DASHBOARD_USER=admin\nDASHBOARD_PASS=%s\n' "$DASH_PASS" \
+  | sudo sh -c "umask 077; cat > '${SECRET_FILE}'"
+sudo chmod 600 "$SECRET_FILE"
+success "Dashboard credential generated and stored in ${SECRET_FILE} (mode 600)"
+
+# Sanitize stale credentials from existing drop-ins. systemd applies
+# Environment= (any drop-in) AFTER EnvironmentFile=, so a leftover
+# DASHBOARD_PASS= line would silently override the freshly generated secret
+# and keep the OLD password valid — defeating the hardening.
+if [ -d "$UNIT_DROPIN_DIR" ]; then
+  sudo sh -c '
+    for conf in "$1"/*.conf; do
+      [ -f "$conf" ] || continue
+      # Strip any Environment= line carrying dashboard credentials (quoted or
+      # not, with optional whitespace around the "="). systemd tolerates
+      # "Environment = X", so allow spaces there too.
+      cleaned=$(grep -Ev "^[[:space:]]*Environment[[:space:]]*=[[:space:]]*\"?DASHBOARD_(USER|PASS)=" "$conf" || true)
+      if [ -z "$cleaned" ]; then
+        rm -f "$conf"
+        continue
+      fi
+      # If nothing substantive remains (only section headers/comments), drop
+      # the file entirely instead of leaving an empty stub behind.
+      if ! printf "%s\n" "$cleaned" | grep -qvE "^[[:space:]]*(\[|#|$)"; then
+        rm -f "$conf"
+        continue
+      fi
+      printf "%s\n" "$cleaned" > "$conf"
+    done
+  ' _ "$UNIT_DROPIN_DIR"
+  if [ -z "$(sudo ls -A "$UNIT_DROPIN_DIR" 2>/dev/null)" ]; then
+    sudo rmdir "$UNIT_DROPIN_DIR" 2>/dev/null || true
+  fi
+  info "Sanitized stale dashboard credentials from existing drop-ins (if any)"
+fi
 
 info "Step 7/8: Creating systemd service..."
-sudo tee /etc/systemd/system/vps-dashboard.service > /dev/null <<EOF
+sudo tee "$UNIT_FILE" > /dev/null <<EOF
 [Unit]
 Description=VPS Dashboard
 After=network.target
@@ -103,15 +196,14 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${APP_DIR}
-ExecStart=$(which node) server.js
+ExecStart=${NODE_BIN} server.js
 Restart=always
 RestartSec=5
 Environment=PORT=${PORT}
 Environment=HOST=127.0.0.1
 Environment=DB_PATH=${DB_DIR}/dashboard.db
-Environment=DASHBOARD_USER=admin
-Environment=DASHBOARD_PASS=${DASH_PASS}
-# Telegram Alerts (uncomment and set your values):
+EnvironmentFile=${SECRET_FILE}
+# Telegram Alerts (uncomment and set values in a root-only credential file):
 # Environment=TELEGRAM_TOKEN=your-bot-token
 # Environment=TELEGRAM_CHAT_ID=your-chat-id
 # Network interface (auto-detected, override if needed):
@@ -121,14 +213,32 @@ Environment=DASHBOARD_PASS=${DASH_PASS}
 WantedBy=multi-user.target
 EOF
 
+# Leak guard: refuse to continue if any unit or drop-in still carries a
+# plaintext dashboard password (EnvironmentFile must be the only source).
+if sudo grep -qrE "DASHBOARD_PASS=" "$UNIT_FILE" "$UNIT_DROPIN_DIR" 2>/dev/null; then
+  error "Plaintext DASHBOARD_PASS found in systemd config — aborting before restart"
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable vps-dashboard
-sudo systemctl start vps-dashboard
-success "systemd service created and started"
+# restart (not start): the running process must pick up the rotated secret;
+# start is a no-op on an active unit and would leave the OLD password live.
+sudo systemctl restart vps-dashboard
+success "systemd service created and restarted"
 
 info "Step 8/8: Configuring nginx..."
 
-if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+# Guard: if an enabled site already serves this domain (possibly with extra
+# routes or certbot-managed config), do NOT create a second server block for
+# the same server_name — nginx would warn "conflicting server name" and one
+# config would silently shadow the other.
+if sudo grep -RlE "server_name[[:space:]]+${DOMAIN}" /etc/nginx/sites-enabled/ >/dev/null 2>&1; then
+  info "An nginx site already serves ${DOMAIN} — skipping nginx changes."
+  success "nginx untouched (existing site preserved)"
+else
+
+# /etc/letsencrypt/live is root-only (0700), so detect the cert as root.
+if sudo test -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"; then
   info "SSL certificate found, configuring HTTPS..."
   sudo tee /etc/nginx/sites-available/vps-dashboard > /dev/null <<NGINX
 server {
@@ -185,6 +295,7 @@ fi
 sudo ln -sf /etc/nginx/sites-available/vps-dashboard /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 success "nginx configured and reloaded"
+fi
 
 # ============================================================
 # Done!
@@ -196,9 +307,10 @@ echo "============================================================"
 echo ""
 echo "  Dashboard: https://${DOMAIN}"
 echo "  Username:  admin"
-echo "  Password:  ${DASH_PASS}"
+echo "  Password:  stored in ${SECRET_FILE} (root-only)"
 echo ""
 echo "  Config:    /etc/systemd/system/vps-dashboard.service"
+echo "  Secrets:   ${SECRET_FILE} (mode 600)"
 echo "  Database:  ${DB_DIR}/dashboard.db"
 echo "  Logs:      journalctl -u vps-dashboard -f"
 echo ""
@@ -209,8 +321,8 @@ echo "    journalctl -u vps-dashboard -f"
 echo ""
 echo "  To enable Telegram alerts:"
 echo "    1. Create bot via @BotFather"
-echo "    2. Edit service: sudo nano /etc/systemd/system/vps-dashboard.service"
-echo "    3. Uncomment TELEGRAM_TOKEN and TELEGRAM_CHAT_ID"
+echo "    2. Add TELEGRAM_TOKEN and TELEGRAM_CHAT_ID to a root-only env file"
+echo "    3. Update the systemd EnvironmentFile= entry"
 echo "    4. sudo systemctl daemon-reload && sudo systemctl restart vps-dashboard"
 echo ""
 echo "  To get SSL (if not already):"

@@ -89,17 +89,27 @@ chmod +x deploy.sh
 The script will:
 1. Install Node.js (if missing)
 2. Install nginx (if missing)
-3. Copy files to `/opt/vps-dashboard`
-4. Install npm dependencies
-5. Generate random password
-6. Create systemd service
-7. Configure nginx reverse proxy
-8. Setup SSL (if cert exists)
+3. Back up the current systemd unit + drop-ins to `/root/backups/` (if present)
+4. Copy files to `/opt/vps-dashboard`
+5. Install npm dependencies
+6. Pin a Node interpreter (existing unit's interpreter first, then system
+   paths) and verify/rebuild native modules against it — avoids a SIGSEGV
+   crash loop when `node` resolves to a version with a different ABI
+7. Generate a random password and store it in `/etc/vps-dashboard.env`
+   (root-only, mode 600) — never printed, and never embedded in the unit
+8. Sanitize any stale `DASHBOARD_USER`/`DASHBOARD_PASS` from existing
+   drop-ins (they would otherwise override the secret file), install the
+   systemd unit with `EnvironmentFile=`, and restart the service
+9. Configure nginx reverse proxy — skipped entirely if an enabled site
+   already serves the domain; SSL is detected as root so root-only
+   `/etc/letsencrypt` permissions don't break detection
 
 ## Configuration
 
-Edit `/etc/systemd/system/vps-dashboard.service` (or a drop-in under
-`vps-dashboard.service.d/`). `DASHBOARD_USER`/`DASHBOARD_PASS` are mandatory:
+`DASHBOARD_USER`/`DASHBOARD_PASS` live in `/etc/vps-dashboard.env`
+(root-only, mode 600), loaded via `EnvironmentFile=` — never put them in
+`Environment=` lines or drop-ins, which override the file and leak via
+`systemctl show`. `DASHBOARD_USER`/`DASHBOARD_PASS` are mandatory:
 the service fails closed without them, and passwords under 32 characters are
 rejected at startup:
 
