@@ -92,6 +92,11 @@ info "Step 4/8: Copying application files..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 sudo cp -r "$SCRIPT_DIR"/* "$APP_DIR/"
 sudo cp -r "$SCRIPT_DIR"/.gitignore "$APP_DIR/" 2>/dev/null || true
+# Never let a checkout's node_modules shadow the deployed one: stale native
+# binaries built for a different Node ABI (e.g. an nvm Node v24 build) survive
+# `npm install` unchanged when versions already satisfy the lockfile, and then
+# crash the service with ERR_DLOPEN_FAILED. npm rebuilds the tree below.
+sudo rm -rf "$APP_DIR/node_modules"
 if [ "$RUNNING_AS_ROOT" = true ]; then
   sudo chown -R root:root "$APP_DIR"
 else
@@ -101,14 +106,13 @@ success "Files copied to $APP_DIR"
 
 info "Step 5/8: Installing npm dependencies..."
 cd "$APP_DIR"
-sudo npm install --production 2>&1 | tail -3
-success "Dependencies installed"
 
-# 5b. Pin the Node interpreter for the systemd unit.
+# 5a. Pin the Node interpreter for the systemd unit BEFORE installing, so
+# npm's build scripts run under the same interpreter the service will use.
 # Do NOT rely on `which node`: a shell/nvm Node whose ABI differs from the
-# one the native modules (better-sqlite3, node-pty) were built for causes a
-# SIGSEGV crash loop at startup. Prefer whatever the existing unit already
-# runs, then system locations, then PATH.
+# one the native modules (better-sqlite3, node-pty) must run under causes an
+# ERR_DLOPEN_FAILED / SIGSEGV crash loop at startup. Prefer whatever the
+# existing unit already runs, then system locations, then PATH.
 NODE_BIN=""
 if [ -f "$EXISTING_UNIT" ]; then
   CURRENT_BIN="$(sed -nE 's/^ExecStart=([^ ]+).*$/\1/p' "$EXISTING_UNIT" | head -1)"
@@ -126,21 +130,31 @@ if [ -z "$NODE_BIN" ]; then
   done
 fi
 [ -n "$NODE_BIN" ] || error "No usable Node.js interpreter found"
+# npm that ships next to the pinned interpreter; runs under that interpreter
+# so any native rebuild targets the right ABI.
+NPM_CLI="$(readlink -f "$(dirname "$NODE_BIN")/npm" 2>/dev/null || true)"
+if [ -n "$NPM_CLI" ] && [ -f "$NPM_CLI" ]; then
+  sudo env PATH="$(dirname "$NODE_BIN"):$PATH" "$NODE_BIN" "$NPM_CLI" install --production 2>&1 | tail -3
+else
+  sudo env PATH="$(dirname "$NODE_BIN"):$PATH" npm install --production 2>&1 | tail -3
+fi
+success "Dependencies installed"
+
+# Real-load probe: better-sqlite3 binds lazily, so a bare require() passes
+# even with an ABI-mismatched binary (false negative). Force the native
+# binding by opening an in-memory DB and spawning a pty — the exact calls the
+# server makes at boot. Exit 0 only if both native modules genuinely load.
+NATIVE_CHECK="const D=require('better-sqlite3');const db=new D(':memory:');db.exec('CREATE TABLE t(a)');db.prepare('INSERT INTO t VALUES (1)').run();const P=require('node-pty');const p=P.spawn('/bin/true');p.kill();process.exit(0)"
 
 info "Verifying native modules against $NODE_BIN ($("$NODE_BIN" -v))..."
-if ! (cd "$APP_DIR" && sudo "$NODE_BIN" -e "require('better-sqlite3'); require('node-pty')" >/dev/null 2>&1); then
+if ! (cd "$APP_DIR" && sudo "$NODE_BIN" -e "$NATIVE_CHECK" >/dev/null 2>&1); then
   warn "Native modules incompatible with $NODE_BIN; rebuilding them..."
-  # Rebuild with the npm that ships NEXT TO the pinned interpreter, executed
-  # under that same interpreter — guarantees the rebuilt .node binaries match
-  # the ABI the service will actually run, regardless of the invoking shell's
-  # PATH (nvm etc.).
-  NPM_CLI="$(readlink -f "$(dirname "$NODE_BIN")/npm" 2>/dev/null || true)"
   if [ -n "$NPM_CLI" ] && [ -f "$NPM_CLI" ]; then
-    (cd "$APP_DIR" && sudo "$NODE_BIN" "$NPM_CLI" rebuild better-sqlite3 node-pty 2>&1 | tail -3) || true
+    (cd "$APP_DIR" && sudo env PATH="$(dirname "$NODE_BIN"):$PATH" "$NODE_BIN" "$NPM_CLI" rebuild better-sqlite3 node-pty 2>&1 | tail -3) || true
   else
     warn "No npm found next to $NODE_BIN; skipping automatic rebuild"
   fi
-  (cd "$APP_DIR" && sudo "$NODE_BIN" -e "require('better-sqlite3'); require('node-pty')" >/dev/null 2>&1) \
+  (cd "$APP_DIR" && sudo "$NODE_BIN" -e "$NATIVE_CHECK" >/dev/null 2>&1) \
     || error "Native modules still fail under $NODE_BIN after rebuild. Install a matching Node or rebuild manually, then re-run."
 fi
 success "Node interpreter pinned: $NODE_BIN ($("$NODE_BIN" -v))"
